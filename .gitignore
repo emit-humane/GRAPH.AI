@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+artifacts/
+logs/
+.env
+node_modules/
+.next/
+*.parquet
+*.pkl
+*.pt
+*.npy
+.DS_Store
+*.egg-info/
+dist/
+build/
