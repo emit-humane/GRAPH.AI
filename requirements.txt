@@ -1,0 +1,36 @@
+# Install order for Windows (no MSVC) — torch-sparse / torch-scatter sdists need
+# a C++ compiler. Use the PyG prebuilt wheel index instead:
+#   pip install "torch==2.11.0" --index-url https://download.pytorch.org/whl/cpu
+#   pip install torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.11.0+cpu.html
+#   pip install -r requirements.txt
+# PyG currently publishes wheels up to torch 2.11; torch 2.12 has no extension wheels yet.
+
+pandas>=2.0
+numpy>=1.26
+scikit-learn>=1.3
+scipy>=1.11
+networkx>=3.2
+faker>=19.0
+geopy>=2.4
+joblib>=1.3
+xgboost>=2.0
+lightgbm>=4.0
+shap>=0.44
+torch>=2.1
+torch-geometric>=2.4
+torch-geometric-temporal>=0.54
+node2vec>=0.4
+infomap>=1.7
+fastapi>=0.110
+uvicorn>=0.27
+sse-starlette>=2.0
+websockets>=12.0
+pydantic>=2.0
+sqlalchemy>=2.0
+asyncpg>=0.29
+redis>=5.0
+reportlab>=4.0
+matplotlib>=3.8
+seaborn>=0.13
+pyarrow>=14.0
+pytest>=7.4

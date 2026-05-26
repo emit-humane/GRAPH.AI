@@ -1,0 +1,33 @@
+{
+  "seed": 42,
+  "num_accounts": 5000,
+  "num_historical_transactions": 500000,
+  "num_stream_transactions": 50000,
+  "fraud_ratio": 0.008,
+  "history_days": 90,
+  "stream_days": 10,
+  "banks": ["SBI", "HDFC", "ICICI", "Axis", "PNB", "Kotak", "YES", "BOB"],
+  "countries": ["IN", "US", "AE", "SG", "GB", "CN", "MU", "NG", "PK", "CH"],
+  "high_risk_countries": ["AE", "MU", "CN", "NG", "PK"],
+  "transaction_types": ["NEFT", "RTGS", "IMPS", "Wire", "UPI", "Card"],
+  "payment_channels": ["Mobile", "Web", "ATM", "Branch"],
+  "amount_distribution": {
+    "normal_mean": 15000,
+    "normal_std": 40000,
+    "min": 100,
+    "max": 5000000
+  },
+  "structuring_threshold": 1000000,
+  "scenario_probabilities": {
+    "structuring": 0.22,
+    "circular_laundering": 0.15,
+    "layering_chain": 0.18,
+    "fan_in": 0.10,
+    "fan_out": 0.10,
+    "fraud_ring": 0.08,
+    "dormant_activation": 0.05,
+    "velocity_burst": 0.05,
+    "cross_border_layering": 0.04,
+    "round_tripping": 0.03
+  }
+}
