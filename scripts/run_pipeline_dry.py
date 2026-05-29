@@ -16,6 +16,8 @@ from pathlib import Path
 
 from src.system2_detection.layer1_rules.rule_engine import RuleEngine
 from src.system2_detection.layer3_supervised.d5b_inference import SupervisedInferencer
+from src.system2_detection.layer4_anomaly.d6b_inference import BehavioralAnomalyInferencer
+from src.system2_detection.layer5_gnn.d7b_inference import TGNInferencer
 from src.system2_detection.shared.d0_replay_driver import ReplayDriver
 from src.system2_detection.shared.d1_feature_updater import LiveFeatureUpdater
 from src.system2_detection.shared.d2_graph_updater import LiveGraphUpdater
@@ -89,12 +91,36 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
     else:
         log.info("[L3] supervised artifacts not all present; skipping")
 
+    anomaly_inferencer = None
+    if BehavioralAnomalyInferencer.all_artifacts_present(store):
+        try:
+            anomaly_inferencer = BehavioralAnomalyInferencer(store=store)
+            log.info("[L4] behavioural-anomaly inferencer loaded (%d features)",
+                     len(anomaly_inferencer.feature_names))
+        except Exception as exc:
+            log.warning("[L4] failed to load anomaly inferencer: %s", exc)
+    else:
+        log.info("[L4] behavioural-anomaly artifacts not all present; skipping")
+
+    tgn_inferencer = None
+    if TGNInferencer.any_artifacts_present(store):
+        try:
+            tgn_inferencer = TGNInferencer(store=store)
+            log.info("[L5] TGN inferencer loaded (mode=%s, %d nodes)",
+                     tgn_inferencer.tgn_mode, len(tgn_inferencer.node_index))
+        except Exception as exc:
+            log.warning("[L5] failed to load TGN inferencer: %s", exc)
+    else:
+        log.info("[L5] neither TGN nor node2vec artifacts present; skipping")
+
     # Iterate
     log.info("[run] processing first %d events ...\n", limit)
     t0 = time.time()
     rule_counter: Counter[str] = Counter()
     high_rule_count = 0
     sup_score_acc: list[float] = []
+    anomaly_score_acc: list[float] = []
+    tgn_score_acc: list[float] = []
     events_iter = driver.events()
     for i, event in enumerate(events_iter):
         if i >= limit:
@@ -107,27 +133,44 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
             high_rule_count += 1
 
         sup_score = None
-        sup_top: list[str] = []
         if inferencer is not None:
             try:
                 sup_out = inferencer.score(feat, graph_vec, rule_out)
                 sup_score = sup_out.supervised_score
-                sup_top = sup_out.top_features[:3]
                 sup_score_acc.append(sup_score)
             except Exception as exc:
                 log.warning("supervised scoring failed at event %d: %s", i, exc)
 
+        anom_score = None
+        if anomaly_inferencer is not None:
+            try:
+                anom_out = anomaly_inferencer.score(feat, graph_vec)
+                anom_score = anom_out.anomaly_score
+                anomaly_score_acc.append(anom_score)
+            except Exception as exc:
+                log.warning("anomaly scoring failed at event %d: %s", i, exc)
+
+        tgn_score = None
+        tgn_explanation = "-"
+        if tgn_inferencer is not None:
+            try:
+                tgn_out = tgn_inferencer.score(feat, graph_vec, event)
+                tgn_score = tgn_out.tgn_score
+                tgn_score_acc.append(tgn_score)
+                tgn_explanation = tgn_out.temporal_graph_explanations[0][:60]
+            except Exception as exc:
+                log.warning("tgn scoring failed at event %d: %s", i, exc)
+
         log.info(
-            "%03d  %s  %s -> %s  amt=%-10.0f  rule=%5.1f  sup=%s  rules=[%s]  top=[%s]",
+            "%03d  %s  amt=%-10.0f  rule=%5.1f  sup=%s  anom=%s  tgn=%s  why=[%s]",
             i,
             event.transaction_id[:8],
-            event.sender_account[:8],
-            event.receiver_account[:8],
             event.amount,
             rule_out.rule_score,
             f"{sup_score:5.1f}" if sup_score is not None else "  n/a",
-            ",".join(rule_out.triggered_rules) if rule_out.triggered_rules else "-",
-            ",".join(sup_top) if sup_top else "-",
+            f"{anom_score:5.1f}" if anom_score is not None else "  n/a",
+            f"{tgn_score:5.1f}" if tgn_score is not None else "  n/a",
+            tgn_explanation,
         )
     dt = time.time() - t0
     log.info("\n[done] processed %d events in %.2fs (%.1f ev/s)", limit, dt, limit / max(dt, 1e-9))
@@ -135,11 +178,29 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
     if sup_score_acc:
         import statistics as _stats
         log.info(
-            "[stats] supervised_score mean=%.1f, p95=%.1f, max=%.1f, >=60: %d",
+            "[stats] supervised_score  mean=%.1f, p95=%.1f, max=%.1f, >=60: %d",
             _stats.mean(sup_score_acc),
             _stats.quantiles(sup_score_acc, n=20)[-1] if len(sup_score_acc) >= 20 else max(sup_score_acc),
             max(sup_score_acc),
             sum(1 for s in sup_score_acc if s >= 60),
+        )
+    if anomaly_score_acc:
+        import statistics as _stats2
+        log.info(
+            "[stats] anomaly_score     mean=%.1f, p95=%.1f, max=%.1f, >=60: %d",
+            _stats2.mean(anomaly_score_acc),
+            _stats2.quantiles(anomaly_score_acc, n=20)[-1] if len(anomaly_score_acc) >= 20 else max(anomaly_score_acc),
+            max(anomaly_score_acc),
+            sum(1 for s in anomaly_score_acc if s >= 60),
+        )
+    if tgn_score_acc:
+        import statistics as _stats3
+        log.info(
+            "[stats] tgn_score         mean=%.1f, p95=%.1f, max=%.1f, >=60: %d",
+            _stats3.mean(tgn_score_acc),
+            _stats3.quantiles(tgn_score_acc, n=20)[-1] if len(tgn_score_acc) >= 20 else max(tgn_score_acc),
+            max(tgn_score_acc),
+            sum(1 for s in tgn_score_acc if s >= 60),
         )
     log.info("[stats] rule firing counts:")
     for rule_id, count in sorted(rule_counter.items()):
