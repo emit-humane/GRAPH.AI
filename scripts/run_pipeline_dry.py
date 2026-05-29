@@ -1,8 +1,9 @@
-"""Dry-run the D0 → D1 → D2 chain on the first 100 stream events.
+"""Dry-run the D0 → D1 → D2 → L1 chain on the first N stream events.
 
 Loads any available offline artifacts (transaction_multigraph.pkl,
 feature_scaler.pkl, community_profiles.parquet) and prints a one-line summary
-per event with the most operationally useful fields from both vectors.
+per event with the most operationally useful fields plus the Layer 1
+rule_score + triggered_rules list.
 """
 
 from __future__ import annotations
@@ -10,8 +11,10 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from collections import Counter
 from pathlib import Path
 
+from src.system2_detection.layer1_rules.rule_engine import RuleEngine
 from src.system2_detection.shared.d0_replay_driver import ReplayDriver
 from src.system2_detection.shared.d1_feature_updater import LiveFeatureUpdater
 from src.system2_detection.shared.d2_graph_updater import LiveGraphUpdater
@@ -68,37 +71,49 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
         graph_features=graph_features,
     )
 
+    rule_engine = RuleEngine()
+    log.info(
+        "[L1] %d rules loaded; max_possible_raw=%.2f",
+        len(rule_engine.rules),
+        rule_engine.max_possible_raw,
+    )
+
     # Iterate
     log.info("[run] processing first %d events ...\n", limit)
     t0 = time.time()
+    rule_counter: Counter[str] = Counter()
+    high_score_count = 0
     events_iter = driver.events()
     for i, event in enumerate(events_iter):
         if i >= limit:
             break
         feat = fu.process_event(event)
         graph_vec = gu.process_event(event)
+        rule_out = rule_engine.evaluate(feat, graph_vec, event)
+        rule_counter.update(rule_out.triggered_rules)
+        if rule_out.rule_score >= 50:
+            high_score_count += 1
         log.info(
-            "%03d  %s  %s -> %s  amt=%.0f  vel1h=%.0f  zsc=%+.2f  "
-            "newDev=%s  cycle=%s(L=%d)  R14u24h=%d  CV=%.2f  "
-            "relay=%s  inflow=%.0f  gap=%.0fs",
+            "%03d  %s  %s -> %s  amt=%-10.0f  score=%5.1f  rules=[%s]  "
+            "cycle=%d(L=%d)  R14u24h=%d/CV=%.2f",
             i,
             event.transaction_id[:8],
             event.sender_account[:8],
             event.receiver_account[:8],
             event.amount,
-            feat.tx_velocity_1h,
-            feat.amount_zscore,
-            int(feat.new_device_flag),
+            rule_out.rule_score,
+            ",".join(rule_out.triggered_rules) if rule_out.triggered_rules else "-",
             int(graph_vec.edge_creates_cycle),
             graph_vec.cycle_length,
             graph_vec.receiver_in_degree_unique_24h,
             graph_vec.receiver_inflow_amount_cv,
-            int(graph_vec.sender_is_relay_node),
-            graph_vec.sender_last_inflow_amount,
-            min(graph_vec.sender_last_inflow_gap_seconds, 99999.0),
         )
     dt = time.time() - t0
     log.info("\n[done] processed %d events in %.2fs (%.1f ev/s)", limit, dt, limit / max(dt, 1e-9))
+    log.info("[stats] high-score events (>=50): %d / %d", high_score_count, limit)
+    log.info("[stats] rule firing counts:")
+    for rule_id, count in sorted(rule_counter.items()):
+        log.info("        %s: %d", rule_id, count)
 
 
 def main() -> None:
