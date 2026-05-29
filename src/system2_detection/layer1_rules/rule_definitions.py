@@ -167,7 +167,6 @@ def _r09_exp(f, g, e):
 def _r10_cond(f, g, e):
     return bool(g.edge_creates_cycle)
 
-
 def _r10_exp(f, g, e):
     return (
         f"Cycle closure: this transaction closes a {int(g.cycle_length)}-hop "

@@ -66,8 +66,21 @@ class LiveGraphUpdater:
         self.G: nx.MultiDiGraph = graph if graph is not None else nx.MultiDiGraph()
         self._community_idx: dict[str, dict] = {}
         if community_profiles is not None and not community_profiles.empty:
-            for _, row in community_profiles.iterrows():
-                self._community_idx[row["account_id"]] = row.to_dict()
+            # L2B emits one row per COMMUNITY with a ``member_accounts`` list.
+            # Expand into a per-account lookup so __process_event__ can do
+            # O(1) sender/receiver community lookups.
+            if "member_accounts" in community_profiles.columns:
+                for _, row in community_profiles.iterrows():
+                    profile = row.to_dict()
+                    members = profile.pop("member_accounts", None)
+                    if members is None:
+                        continue
+                    for member in members:
+                        self._community_idx[str(member)] = profile
+            elif "account_id" in community_profiles.columns:
+                # Allow a pre-flattened per-account frame too.
+                for _, row in community_profiles.iterrows():
+                    self._community_idx[row["account_id"]] = row.to_dict()
         self._gfeat_idx: dict[str, dict] = {}
         if graph_features is not None and not graph_features.empty:
             for _, row in graph_features.iterrows():

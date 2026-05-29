@@ -1,9 +1,9 @@
-"""Dry-run the D0 → D1 → D2 → L1 chain on the first N stream events.
+"""Dry-run the D0 → D1 → D2 → L1 → L3 chain on the first N stream events.
 
 Loads any available offline artifacts (transaction_multigraph.pkl,
-feature_scaler.pkl, community_profiles.parquet) and prints a one-line summary
-per event with the most operationally useful fields plus the Layer 1
-rule_score + triggered_rules list.
+feature_scaler.pkl, community_profiles.parquet, supervised_*.pkl) and prints a
+one-line summary per event with the most operationally useful fields plus the
+Layer 1 rule_score + the Layer 3 supervised_score when available.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from src.system2_detection.layer1_rules.rule_engine import RuleEngine
+from src.system2_detection.layer3_supervised.d5b_inference import SupervisedInferencer
 from src.system2_detection.shared.d0_replay_driver import ReplayDriver
 from src.system2_detection.shared.d1_feature_updater import LiveFeatureUpdater
 from src.system2_detection.shared.d2_graph_updater import LiveGraphUpdater
@@ -78,11 +79,22 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
         rule_engine.max_possible_raw,
     )
 
+    inferencer = None
+    if SupervisedInferencer.all_artifacts_present(store):
+        try:
+            inferencer = SupervisedInferencer(store=store)
+            log.info("[L3] supervised inferencer loaded (%d features)", len(inferencer.feature_names))
+        except Exception as exc:
+            log.warning("[L3] failed to load supervised inferencer: %s", exc)
+    else:
+        log.info("[L3] supervised artifacts not all present; skipping")
+
     # Iterate
     log.info("[run] processing first %d events ...\n", limit)
     t0 = time.time()
     rule_counter: Counter[str] = Counter()
-    high_score_count = 0
+    high_rule_count = 0
+    sup_score_acc: list[float] = []
     events_iter = driver.events()
     for i, event in enumerate(events_iter):
         if i >= limit:
@@ -92,25 +104,43 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
         rule_out = rule_engine.evaluate(feat, graph_vec, event)
         rule_counter.update(rule_out.triggered_rules)
         if rule_out.rule_score >= 50:
-            high_score_count += 1
+            high_rule_count += 1
+
+        sup_score = None
+        sup_top: list[str] = []
+        if inferencer is not None:
+            try:
+                sup_out = inferencer.score(feat, graph_vec, rule_out)
+                sup_score = sup_out.supervised_score
+                sup_top = sup_out.top_features[:3]
+                sup_score_acc.append(sup_score)
+            except Exception as exc:
+                log.warning("supervised scoring failed at event %d: %s", i, exc)
+
         log.info(
-            "%03d  %s  %s -> %s  amt=%-10.0f  score=%5.1f  rules=[%s]  "
-            "cycle=%d(L=%d)  R14u24h=%d/CV=%.2f",
+            "%03d  %s  %s -> %s  amt=%-10.0f  rule=%5.1f  sup=%s  rules=[%s]  top=[%s]",
             i,
             event.transaction_id[:8],
             event.sender_account[:8],
             event.receiver_account[:8],
             event.amount,
             rule_out.rule_score,
+            f"{sup_score:5.1f}" if sup_score is not None else "  n/a",
             ",".join(rule_out.triggered_rules) if rule_out.triggered_rules else "-",
-            int(graph_vec.edge_creates_cycle),
-            graph_vec.cycle_length,
-            graph_vec.receiver_in_degree_unique_24h,
-            graph_vec.receiver_inflow_amount_cv,
+            ",".join(sup_top) if sup_top else "-",
         )
     dt = time.time() - t0
     log.info("\n[done] processed %d events in %.2fs (%.1f ev/s)", limit, dt, limit / max(dt, 1e-9))
-    log.info("[stats] high-score events (>=50): %d / %d", high_score_count, limit)
+    log.info("[stats] rule-score >=50: %d / %d", high_rule_count, limit)
+    if sup_score_acc:
+        import statistics as _stats
+        log.info(
+            "[stats] supervised_score mean=%.1f, p95=%.1f, max=%.1f, >=60: %d",
+            _stats.mean(sup_score_acc),
+            _stats.quantiles(sup_score_acc, n=20)[-1] if len(sup_score_acc) >= 20 else max(sup_score_acc),
+            max(sup_score_acc),
+            sum(1 for s in sup_score_acc if s >= 60),
+        )
     log.info("[stats] rule firing counts:")
     for rule_id, count in sorted(rule_counter.items()):
         log.info("        %s: %d", rule_id, count)
