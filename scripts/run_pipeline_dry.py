@@ -18,6 +18,11 @@ from src.system2_detection.layer1_rules.rule_engine import RuleEngine
 from src.system2_detection.layer3_supervised.d5b_inference import SupervisedInferencer
 from src.system2_detection.layer4_anomaly.d6b_inference import BehavioralAnomalyInferencer
 from src.system2_detection.layer5_gnn.d7b_inference import TGNInferencer
+from src.system2_detection.post_detection.d8_fusion import (
+    RiskFusionEngine,
+    collect_layer_scores,
+)
+from src.system2_detection.post_detection.p2_alerts import AlertManager
 from src.system2_detection.shared.d0_replay_driver import ReplayDriver
 from src.system2_detection.shared.d1_feature_updater import LiveFeatureUpdater
 from src.system2_detection.shared.d2_graph_updater import LiveGraphUpdater
@@ -41,7 +46,7 @@ def _safe_load(store: ArtifactStore, name: str):
         return None
 
 
-def run(limit: int = 100, warm_days: int = 0) -> None:
+def run(limit: int = 100, warm_days: int = 0, clear_alerts: bool = False) -> None:
     store = ArtifactStore()
 
     # Load whatever's available
@@ -113,6 +118,15 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
     else:
         log.info("[L5] neither TGN nor node2vec artifacts present; skipping")
 
+    fusion = RiskFusionEngine(fusion_mode="static_weights")
+    log.info("[D8] fusion engine: weights=%s", fusion.weights)
+
+    alerts = AlertManager()
+    if clear_alerts:
+        removed = alerts.clear()
+        log.info("[P2] cleared %d existing alerts", removed)
+    log.info("[P2] alert manager ready (db=%s)", alerts.engine.url)
+
     # Iterate
     log.info("[run] processing first %d events ...\n", limit)
     t0 = time.time()
@@ -121,6 +135,8 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
     sup_score_acc: list[float] = []
     anomaly_score_acc: list[float] = []
     tgn_score_acc: list[float] = []
+    fused_score_acc: list[float] = []
+    level_counter: Counter[str] = Counter()
     events_iter = driver.events()
     for i, event in enumerate(events_iter):
         if i >= limit:
@@ -132,45 +148,61 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
         if rule_out.rule_score >= 50:
             high_rule_count += 1
 
-        sup_score = None
+        sup_out = None
         if inferencer is not None:
             try:
                 sup_out = inferencer.score(feat, graph_vec, rule_out)
-                sup_score = sup_out.supervised_score
-                sup_score_acc.append(sup_score)
+                sup_score_acc.append(sup_out.supervised_score)
             except Exception as exc:
                 log.warning("supervised scoring failed at event %d: %s", i, exc)
 
-        anom_score = None
+        anom_out = None
         if anomaly_inferencer is not None:
             try:
                 anom_out = anomaly_inferencer.score(feat, graph_vec)
-                anom_score = anom_out.anomaly_score
-                anomaly_score_acc.append(anom_score)
+                anomaly_score_acc.append(anom_out.anomaly_score)
             except Exception as exc:
                 log.warning("anomaly scoring failed at event %d: %s", i, exc)
 
-        tgn_score = None
-        tgn_explanation = "-"
+        tgn_out = None
         if tgn_inferencer is not None:
             try:
                 tgn_out = tgn_inferencer.score(feat, graph_vec, event)
-                tgn_score = tgn_out.tgn_score
-                tgn_score_acc.append(tgn_score)
-                tgn_explanation = tgn_out.temporal_graph_explanations[0][:60]
+                tgn_score_acc.append(tgn_out.tgn_score)
             except Exception as exc:
                 log.warning("tgn scoring failed at event %d: %s", i, exc)
 
+        layer_scores = collect_layer_scores(
+            rule_out=rule_out, graph_vec=graph_vec, supervised_out=sup_out,
+            anomaly_out=anom_out, tgn_out=tgn_out,
+            transaction_id=event.transaction_id, sender_account=event.sender_account,
+        )
+        fused = fusion.fuse(layer_scores)
+        fused_score_acc.append(fused.transaction_risk_score)
+        level_counter[fused.risk_level] += 1
+
+        # P2 — persist alert (Open status) when risk hits High/Critical.
+        alert_obj = alerts.process(
+            fused,
+            rule_explanations=list(rule_out.rule_explanations),
+            anomaly_drivers=list(anom_out.anomaly_drivers) if anom_out is not None else [],
+            structural_anomaly_explanations=list(tgn_out.temporal_graph_explanations) if tgn_out is not None else [],
+            community_id=int(graph_vec.sender_community_id) if graph_vec is not None else -1,
+        )
+
+        lead = fused.explanation.split("\n", 1)[0][:90]
         log.info(
-            "%03d  %s  amt=%-10.0f  rule=%5.1f  sup=%s  anom=%s  tgn=%s  why=[%s]",
+            "%03d  %s  rule=%5.1f  sup=%5.1f  anom=%5.1f  tgn=%5.1f  RISK=%5.1f (%s) %s  lead=[%s]",
             i,
             event.transaction_id[:8],
-            event.amount,
-            rule_out.rule_score,
-            f"{sup_score:5.1f}" if sup_score is not None else "  n/a",
-            f"{anom_score:5.1f}" if anom_score is not None else "  n/a",
-            f"{tgn_score:5.1f}" if tgn_score is not None else "  n/a",
-            tgn_explanation,
+            layer_scores.rule_score,
+            layer_scores.supervised_score,
+            layer_scores.anomaly_score,
+            layer_scores.tgn_score,
+            fused.transaction_risk_score,
+            fused.risk_level,
+            "ALERT" if alert_obj is not None else "    ",
+            lead,
         )
     dt = time.time() - t0
     log.info("\n[done] processed %d events in %.2fs (%.1f ev/s)", limit, dt, limit / max(dt, 1e-9))
@@ -202,6 +234,19 @@ def run(limit: int = 100, warm_days: int = 0) -> None:
             max(tgn_score_acc),
             sum(1 for s in tgn_score_acc if s >= 60),
         )
+    if fused_score_acc:
+        import statistics as _stats4
+        log.info(
+            "[stats] FUSED_RISK        mean=%.1f, p95=%.1f, max=%.1f",
+            _stats4.mean(fused_score_acc),
+            _stats4.quantiles(fused_score_acc, n=20)[-1] if len(fused_score_acc) >= 20 else max(fused_score_acc),
+            max(fused_score_acc),
+        )
+        log.info("[stats] risk levels: %s", dict(level_counter))
+    # P2 — export the alert log
+    alerts_csv = DATA_DIR / "generated_alerts.csv"
+    alerts.export_csv(alerts_csv)
+    log.info("[P2] alerts persisted: %d  exported to %s", alerts.count(), alerts_csv)
     log.info("[stats] rule firing counts:")
     for rule_id, count in sorted(rule_counter.items()):
         log.info("        %s: %d", rule_id, count)
@@ -212,8 +257,10 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--warm-days", type=int, default=0,
                         help="Warm-start D1 with the last N days of history (0 = skip)")
+    parser.add_argument("--clear-alerts", action="store_true",
+                        help="Delete all existing alerts in logs/alerts.db before the run.")
     args = parser.parse_args()
-    run(limit=args.limit, warm_days=args.warm_days)
+    run(limit=args.limit, warm_days=args.warm_days, clear_alerts=args.clear_alerts)
 
 
 if __name__ == "__main__":
