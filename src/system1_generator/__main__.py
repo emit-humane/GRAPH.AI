@@ -14,7 +14,12 @@ from . import g1_account_builder, g2_normal_generator, g3_scenario_injector, g4_
 from .common import CONFIG_PATH, DATA_DIR, GeneratorConfig, ensure_dirs
 
 
-def run(config: GeneratorConfig, out_dir: Path = DATA_DIR, with_warmup: bool = True) -> None:
+def run(
+    config: GeneratorConfig,
+    out_dir: Path = DATA_DIR,
+    with_warmup: bool = True,
+    hist_frac: float = 0.9,
+) -> None:
     ensure_dirs()
     t0 = time.time()
     print(f"[G1] Building {config.num_accounts:,} accounts ...")
@@ -37,7 +42,7 @@ def run(config: GeneratorConfig, out_dir: Path = DATA_DIR, with_warmup: bool = T
 
     t3 = time.time()
     print("[G4] Splitting 90/10, fixing reverse causality, exporting CSVs ...")
-    hist, stream = g4_splitter.split_and_export(combined, gt, out_dir=out_dir)
+    hist, stream = g4_splitter.split_and_export(combined, gt, out_dir=out_dir, hist_frac=hist_frac)
     print(f"     historical={len(hist):,} stream={len(stream):,} in {time.time() - t3:.1f}s")
 
     if with_warmup:
@@ -54,10 +59,16 @@ def main():
     parser.add_argument("--config", default=str(CONFIG_PATH))
     parser.add_argument("--out-dir", default=str(DATA_DIR))
     parser.add_argument("--no-warmup", action="store_true")
+    parser.add_argument(
+        "--hist-frac", type=float, default=0.9,
+        help="Chronological split between historical and stream. Default 0.9 "
+             "(spec); use 0.5 or lower in dev/quick mode so small datasets "
+             "still place suspicious tx in the stream window.",
+    )
     args = parser.parse_args()
 
     cfg = GeneratorConfig.from_file(Path(args.config))
-    run(cfg, Path(args.out_dir), with_warmup=not args.no_warmup)
+    run(cfg, Path(args.out_dir), with_warmup=not args.no_warmup, hist_frac=args.hist_frac)
 
 
 if __name__ == "__main__":

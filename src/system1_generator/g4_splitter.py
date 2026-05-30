@@ -78,10 +78,16 @@ def split_and_export(
     combined: pd.DataFrame,
     ground_truth: pd.DataFrame,
     out_dir: Path = DATA_DIR,
+    hist_frac: float = 0.9,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Produce historical / stream / hidden_ground_truth CSVs. Returns (hist, stream)."""
+    """Produce historical / stream / hidden_ground_truth CSVs. Returns (hist, stream).
+
+    ``hist_frac`` controls the chronological split point. Default 0.9 matches
+    the spec; quick/dev modes can pass 0.5 so smaller datasets still see
+    suspicious tx land in the stream window.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    hist, stream = _chrono_split(combined)
+    hist, stream = _chrono_split(combined, hist_frac=hist_frac)
     hist, stream = _fix_reverse_causality(hist, stream)
     _drop_labels(hist).to_csv(out_dir / "historical_transactions.csv", index=False)
     _drop_labels(stream).to_csv(out_dir / "stream_transactions.csv", index=False)
