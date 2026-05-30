@@ -157,17 +157,21 @@ async def generator_loop(state: AppState) -> None:
             min_amt = float(cfg.get("min_amount", 0))
             max_amt = float(cfg.get("max_amount", 1e12))
 
-            # Pull next event (loop back to start of stream when exhausted)
-            try:
-                event = next(events_iter)
-            except StopIteration:
-                events_iter = iter(state.driver.events())
-                continue
+            # Drain any Scenario-Studio-injected events FIRST, so the operator
+            # sees what they just queued without competing with the D0 stream.
+            if state.studio_injection_queue:
+                event = state.studio_injection_queue.pop(0)
+            else:
+                # Pull next event from D0 (wrap around when exhausted)
+                try:
+                    event = next(events_iter)
+                except StopIteration:
+                    events_iter = iter(state.driver.events())
+                    continue
 
-            # Amount filter: lets the UI sliders narrow the live feed
-            if not (min_amt <= float(event.amount) <= max_amt):
-                # advance without delay — these don't count toward cadence
-                continue
+                # Amount filter applies to D0 only — injected events bypass.
+                if not (min_amt <= float(event.amount) <= max_amt):
+                    continue
 
             t0 = time.time()
             try:

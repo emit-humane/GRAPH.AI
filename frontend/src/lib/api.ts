@@ -61,6 +61,27 @@ export const api = {
 
   // stats
   evaluation: () => _get<any>("/stats/evaluation"),
+
+  // scenario studio
+  studioCatalog: () => _get<{ typologies: any[] }>("/studio/catalog"),
+  studioPreview: (typology: string, params: Record<string, any>, seed: number, count: number = 1) => {
+    const q = new URLSearchParams();
+    q.set("typology", typology);
+    q.set("seed", String(seed));
+    q.set("count", String(count));
+    q.set("params", JSON.stringify(params));
+    return _get<any>(`/studio/preview?${q.toString()}`);
+  },
+  studioInject: (typology: string, params: Record<string, any>, seed: number, count: number = 1) =>
+    _post<any>("/studio/inject", { typology, params, seed, count }),
+  studioExport: (scenarios: Array<{ typology: string; params: Record<string, any>; seed: number; count: number }>) =>
+    _post<any>("/studio/export", { scenarios }),
+  studioExportDownloadUrl: () => "/api/studio/export/download",
+  studioClearExport: async () => {
+    const r = await fetch("/api/studio/export", { method: "DELETE" });
+    return r.json();
+  },
+  studioActivity: () => _get<any>("/studio/activity"),
 };
 
 export const SSE_URL = `${BASE}/stream/events`;

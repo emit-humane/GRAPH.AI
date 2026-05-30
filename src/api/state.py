@@ -71,6 +71,12 @@ class AppState:
     recent_alerts: list[dict] = field(default_factory=list)        # last N persisted Alerts
     subscribers: set = field(default_factory=set)                  # SSE queue.Queue per connection
 
+    # Scenario Studio: queue of injected events the generator drains
+    # IN FRONT OF the D0 stream, plus a labelled export buffer.
+    studio_injection_queue: list = field(default_factory=list)
+    studio_export_buffer: list[dict] = field(default_factory=list)
+    studio_activity_log: list[dict] = field(default_factory=list)
+
     @property
     def driver_count(self) -> int:
         return self.driver.count if self.driver is not None else 0

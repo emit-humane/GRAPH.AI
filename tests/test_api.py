@@ -68,3 +68,69 @@ def test_unknown_case_404(client):
     assert r2.status_code == 404
     r3 = client.get("/report/does-not-exist")
     assert r3.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Scenario Studio endpoints
+# --------------------------------------------------------------------------- #
+
+
+def test_studio_catalog(client):
+    r = client.get("/studio/catalog")
+    assert r.status_code == 200
+    typologies = r.json()["typologies"]
+    keys = {t["key"] for t in typologies}
+    # All 10 typologies must be in the catalog
+    assert keys >= {"fan_in", "layering_chain", "structuring", "round_tripping"}
+    # fan_in targets R14 and layering_chain targets R15 (the R14/R15 contract)
+    fan_in = next(t for t in typologies if t["key"] == "fan_in")
+    layering = next(t for t in typologies if t["key"] == "layering_chain")
+    assert "R14" in fan_in["target_rules"]
+    assert "R15" in layering["target_rules"]
+
+
+def test_studio_preview_returns_plan(client):
+    r = client.get("/studio/preview?typology=structuring&seed=42&count=2")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["plans"]) == 2
+    assert body["plans"][0]["summary"]["edge_count"] > 0
+
+
+def test_studio_preview_unknown_typology(client):
+    r = client.get("/studio/preview?typology=foo")
+    assert r.status_code == 404
+
+
+def test_studio_inject_queues_events(client):
+    r = client.post("/studio/inject", json={
+        "typology": "fan_in", "params": {"sources": 6}, "seed": 7, "count": 1,
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued_events"] >= 5
+    assert body["queue_depth"] >= body["queued_events"]
+
+
+def test_studio_export_buffer_and_download(client):
+    r = client.post("/studio/export", json={
+        "scenarios": [{"typology": "structuring", "seed": 5, "count": 1, "params": {}}],
+    })
+    assert r.status_code == 200
+    assert r.json()["appended"] > 0
+    # Download drains the buffer and returns a zip
+    r2 = client.post("/studio/export/download")
+    assert r2.status_code == 200
+    assert r2.headers["content-type"].startswith("application/zip")
+
+
+def test_studio_export_empty_payload_400(client):
+    r = client.post("/studio/export", json={"scenarios": []})
+    assert r.status_code == 400
+
+
+def test_studio_activity(client):
+    r = client.get("/studio/activity")
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "queue_depth" in body and "export_buffer" in body

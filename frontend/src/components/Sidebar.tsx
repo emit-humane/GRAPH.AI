@@ -11,6 +11,7 @@ const NAV = [
   { href: "/report", label: "Fraud Report" },
   { href: "/graph", label: "Graph Explorer" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/studio", label: "Scenario Studio" },
 ];
 
 export default function Sidebar() {

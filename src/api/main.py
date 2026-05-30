@@ -25,6 +25,7 @@ from .routers import (
     build_stream_router,
 )
 from .state import AppState, build_app_state
+from .studio_router import build_studio_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +91,8 @@ def root() -> dict:
             "/geo/case/{tx_id}",
             "/report/{tx_id}", "/report/{tx_id}/pdf", "/report/{tx_id}/zip",
             "/stats/evaluation",
+            "/studio/catalog", "/studio/preview", "/studio/inject",
+            "/studio/export", "/studio/export/download", "/studio/activity",
         ],
     }
 
@@ -117,3 +120,4 @@ app.include_router(build_graph_router(_STATE))
 app.include_router(build_geo_router(_STATE))
 app.include_router(build_report_router(_STATE))
 app.include_router(build_stats_router(_STATE))
+app.include_router(build_studio_router(_STATE))
