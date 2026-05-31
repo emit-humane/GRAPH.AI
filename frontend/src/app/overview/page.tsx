@@ -191,7 +191,32 @@ export default function OverviewPage() {
               {liveAlerts.length > 0 ? `, ${liveAlerts.length} live this session` : ""})
             </SectionTitle>
           </div>
-          <PillNote>Select one transaction to investigate in the other tabs</PillNote>
+          <div className="flex items-center gap-2">
+            <PillNote>Select one transaction to investigate in the other tabs</PillNote>
+            <Btn
+              variant="danger"
+              onClick={async () => {
+                if (alerts.length === 0) return;
+                const ok = window.confirm(
+                  `Clear all ${alerts.length} persisted alerts? This wipes logs/alerts.db, the in-memory buffer, and the exported CSV. The detector and the stream keep running.`,
+                );
+                if (!ok) return;
+                try {
+                  const res = await api.alertsClear();
+                  // Force a fresh fetch -- historical alerts state will repopulate empty,
+                  // live SSE keeps streaming new ones.
+                  setHistoricalAlerts([]);
+                  setVisibleCount(50);
+                  window.alert(`Cleared ${res.cleared_from_db} alerts.`);
+                } catch (e: any) {
+                  window.alert(`Clear failed: ${e?.message ?? e}`);
+                }
+              }}
+              disabled={alerts.length === 0}
+            >
+              Clear alerts
+            </Btn>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3">

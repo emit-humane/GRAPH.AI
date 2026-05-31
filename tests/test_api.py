@@ -168,3 +168,17 @@ def test_inject_csv_empty_400(client):
     files = {"file": ("empty.csv", b"", "text/csv")}
     r = client.post("/generator/inject_csv?auto_start=false", files=files)
     assert r.status_code == 400
+
+
+def test_clear_alerts_returns_count(client):
+    """DELETE /alerts must wipe the DB + buffer and return the cleared count."""
+    r = client.delete("/alerts")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "cleared_from_db" in body
+    assert body["cleared_from_buffer"] is True
+    assert "alerts_csv_reset" in body
+    # Idempotent — calling again should return 0
+    r2 = client.delete("/alerts")
+    assert r2.status_code == 200
+    assert r2.json()["cleared_from_db"] == 0

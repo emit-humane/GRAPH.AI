@@ -358,6 +358,33 @@ def build_alerts_router(state: AppState) -> APIRouter:
             raise HTTPException(status_code=404, detail=f"alert {alert_id} not found")
         return _ui_shape(updated)
 
+    @r.delete("")
+    def clear_alerts() -> dict[str, Any]:
+        """Wipe every persisted alert from the DB AND the in-memory recency
+        buffer AND the exported CSV. Intended for "start from a clean
+        dashboard" workflows -- a fresh demo, a re-run of the verification
+        harness, etc. Does NOT touch artifacts, the multigraph, or the
+        Scenario Studio injection queue.
+        """
+        n_db = state.alerts.clear()
+        state.recent_alerts.clear()
+        # Reset the alert counter so the Overview "Alerts" stat tile mirrors
+        # the wipe. events_emitted intentionally keeps counting -- the
+        # generator's stream cursor is unchanged.
+        state.generator_status["alerts_emitted"] = 0
+        # Wipe the exported CSV so the next System 3 run doesn't see stale
+        # alert rows that no longer exist in the DB.
+        csv_path = DATA_DIR / "generated_alerts.csv"
+        try:
+            state.alerts.export_csv(csv_path)
+        except Exception as exc:
+            logger.warning("[alerts] could not rewrite empty CSV at %s: %s", csv_path, exc)
+        return {
+            "cleared_from_db":     int(n_db),
+            "cleared_from_buffer": True,
+            "alerts_csv_reset":    str(csv_path),
+        }
+
     return r
 
 

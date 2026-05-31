@@ -68,6 +68,11 @@ export const api = {
   alert: (id: string) => _get<any>(`/alerts/${id}`),
   alertStatus: (id: string, status: string, assigned_to?: string) =>
     _patch<any>(`/alerts/${id}/status`, { alert_status: status, assigned_to }),
+  alertsClear: async () => {
+    const r = await fetch(`${BASE}/alerts`, { method: "DELETE" });
+    if (!r.ok) throw new Error(`DELETE /alerts -> ${r.status}`);
+    return r.json() as Promise<{ cleared_from_db: number; cleared_from_buffer: boolean; alerts_csv_reset: string }>;
+  },
 
   // graph + geo
   caseGraph: (txId: string) => _get<any>(`/graph/case/${txId}`),
