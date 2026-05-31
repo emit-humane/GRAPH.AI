@@ -95,7 +95,7 @@ export function PillNote({ children }: { children: ReactNode }) {
 export function ViewHeader({ title, sub }: { title: string; sub: string }) {
   return (
     <div className="mb-6">
-      <div className="text-[11px] tracking-[0.3em] font-mono text-textDim mb-2">G.R.A.P.H. AI</div>
+      <div className="text-[11px] tracking-[0.3em] font-mono text-textDim mb-2">G.R.A.P.H AI</div>
       <h1 className="text-3xl font-bold font-display m-0">{title}</h1>
       <p className="text-textDim text-sm mt-2 max-w-2xl leading-relaxed">{sub}</p>
     </div>

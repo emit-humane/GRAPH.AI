@@ -13,11 +13,12 @@ interface Props {
 }
 
 const LAYER_ROWS = [
-  { key: "rule_score", name: "Rule Engine", layer: "L1", color: "#22d3ee", rationale: "deterministic governance" },
+  // v2 fusion (rule + graph dominant): Layer 1 is PRIMARY at 0.30 weight.
+  { key: "rule_score", name: "Rule Engine", layer: "L1", color: "#22d3ee", rationale: "PRIMARY auditable AML rules", primary: true },
   { key: "graph_score", name: "Graph Analytics", layer: "L2", color: "#a78bfa", rationale: "structural AML" },
-  { key: "supervised_score", name: "Supervised ML", layer: "L3", color: "#34d399", rationale: "PRIMARY calibrated", primary: true },
+  { key: "supervised_score", name: "Supervised ML", layer: "L3", color: "#34d399", rationale: "calibrated ML detector" },
   { key: "anomaly_score", name: "Behavioural Anomaly", layer: "L4", color: "#fbbf24", rationale: "unseen behaviour" },
-  { key: "tgn_score", name: "TGN / GNN", layer: "L5", color: "#f472b6", rationale: "advanced specialist" },
+  { key: "tgn_score", name: "TGN / GNN", layer: "L5", color: "#f472b6", rationale: "temporal specialist" },
 ];
 
 export default function ScoreBreakdownBars({

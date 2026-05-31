@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 // ============================================================================
-// GRAPH.AI — Graph-based Risk Analysis & Pattern Hunting
+// G.R.A.P.H AI — Graph-based Risk Analysis & Pattern Hunting
 // Self-contained preview build. Mock streaming data. Four views.
 // Port target: Next.js App Router (one folder per view) wired to the
 // System 2 backend (S4 SSE stream + P2 alerts API + S6 subgraph endpoint).
@@ -549,7 +549,7 @@ export default function App() {
   function ViewHeader({ title, sub }) {
     return (
       <div style={{ marginBottom: 22 }}>
-        <div style={{ fontSize: 11, letterSpacing: 3, fontFamily: MONO, color: COLORS.textDim, marginBottom: 8 }}>G.R.A.P.H. AI</div>
+        <div style={{ fontSize: 11, letterSpacing: 3, fontFamily: MONO, color: COLORS.textDim, marginBottom: 8 }}>G.R.A.P.H AI</div>
         <h1 style={{ fontSize: 34, fontWeight: 700, fontFamily: DISPLAY, margin: 0 }}>{title}</h1>
         <p style={{ color: COLORS.textDim, fontSize: 14, marginTop: 8, maxWidth: 640, lineHeight: 1.6 }}>{sub}</p>
       </div>
@@ -596,7 +596,7 @@ export default function App() {
           <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg, #1e3a5f, #2bb673)",
             display: "grid", placeItems: "center", fontWeight: 700, fontFamily: DISPLAY, fontSize: 14 }}>GA</div>
           <div>
-            <div style={{ fontSize: 10, letterSpacing: 2, fontFamily: MONO, color: COLORS.textDim }}>G.R.A.P.H. AI</div>
+            <div style={{ fontSize: 10, letterSpacing: 2, fontFamily: MONO, color: COLORS.textDim }}>G.R.A.P.H AI</div>
             <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.3 }}>Graph-based Risk Analysis &amp; Pattern Hunting</div>
           </div>
         </div>

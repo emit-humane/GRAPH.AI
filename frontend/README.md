@@ -1,4 +1,4 @@
-# GRAPH.AI Frontend
+# G.R.A.P.H AI Frontend
 
 Next.js 14 (App Router) + Tailwind + Cytoscape + Leaflet. Talks to the FastAPI
 backend at `:8000` via `/api/*` proxy rewrites configured in `next.config.js`.
@@ -30,7 +30,8 @@ Or, from the repo root: `make install-frontend && make frontend`.
 - `src/stores/selectionStore.ts` — Zustand store for cross-tab case selection
 - `src/lib/api.ts` — single source of truth for backend calls
 - `src/components/ScoreBreakdownBars.tsx` — the 5-layer breakdown widget,
-  with **Supervised (L3) marked as PRIMARY**
+  with **Layer 1 (Rules) marked as PRIMARY** under the v2 fusion weights
+  (rule 0.30, graph 0.25, supervised 0.20, anomaly 0.15, tgn 0.10)
 
 ## Environment
 

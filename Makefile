@@ -1,4 +1,4 @@
-# GRAPH.AI — top-level orchestration
+# G.R.A.P.H AI — top-level orchestration
 
 PY = .venv/Scripts/python.exe
 PIP = .venv/Scripts/pip.exe
@@ -7,7 +7,7 @@ UVICORN = .venv/Scripts/uvicorn.exe
 .PHONY: help install install-frontend dev backend frontend test clean
 
 help:
-	@echo "GRAPH.AI Makefile"
+	@echo "G.R.A.P.H AI Makefile"
 	@echo ""
 	@echo "  make install          install backend Python deps"
 	@echo "  make install-frontend npm install in frontend/"

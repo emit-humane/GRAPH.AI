@@ -1,4 +1,4 @@
-"""GRAPH.AI FastAPI app — entry point at :8000.
+"""G.R.A.P.H AI FastAPI app — entry point at :8000.
 
 Run via::
 
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="GRAPH.AI Backend", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="G.R.A.P.H AI Backend", version="1.0.0", lifespan=lifespan)
 app.state.appstate = _STATE
 
 # CORS — env-driven so the deployed backend can restrict to the Vercel
@@ -93,7 +93,7 @@ logger.info("[api] CORS origins=%s credentials=%s", _origins, _allow_credentials
 @app.get("/")
 def root() -> dict:
     return {
-        "name": "GRAPH.AI",
+        "name": "G.R.A.P.H AI",
         "status": "ok",
         "endpoints": [
             "/generator/start", "/generator/stop", "/generator/status",

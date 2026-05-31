@@ -1,4 +1,4 @@
-# GraphSentinel — Real-Time Fund-Flow Tracking & Money-Laundering Detection
+# G.R.A.P.H AI — Real-Time Fund-Flow Tracking & Money-Laundering Detection
 
 **Team BAZOOKA · IIT Roorkee · iDEA 2.0 Phase 2 (POC)**
 **Problem Statement PS3 — Fund Flow Tracking for Fraud Detection (Union Bank of India)**
@@ -7,7 +7,7 @@
 
 ## Problem Statement
 
-This project addresses **PS3 — Fund Flow Tracking for Fraud Detection**. Money launderers move criminal proceeds through Union Bank by splitting and routing funds across many accounts, banks, and borders; because each bank sees only isolated transactions, the laundering *network* stays invisible until the money is gone. **GraphSentinel** ingests a live transaction stream, models every account and transfer as a directed temporal multigraph, and runs **five complementary detection engines** over that graph to expose laundering networks — structuring, circular round-tripping, layering chains, fan-in/out, fraud rings, dormant activation, velocity bursts, cross-border layering, and round-tripping — in real time, with a calibrated, explainable risk score per transaction.
+This project addresses **PS3 — Fund Flow Tracking for Fraud Detection**. Money launderers move criminal proceeds through Union Bank by splitting and routing funds across many accounts, banks, and borders; because each bank sees only isolated transactions, the laundering *network* stays invisible until the money is gone. **G.R.A.P.H AI** (Graph-based Risk Analysis & Pattern Hunting) ingests a live transaction stream, models every account and transfer as a directed temporal multigraph, and runs **five complementary detection engines** over that graph to expose laundering networks — structuring, circular round-tripping, layering chains, fan-in/out, fraud rings, dormant activation, velocity bursts, cross-border layering, and round-tripping — in real time, with a calibrated, explainable risk score per transaction.
 
 ## Live Demo
 
@@ -56,8 +56,8 @@ A full labelled architecture diagram is in the **D3 — Technical Architecture**
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/<your-team>/graphsentinel.git
-cd graphsentinel
+git clone https://github.com/emit-humane/GRAPH.AI.git
+cd GRAPH.AI
 ```
 
 **2. Backend — create a virtual environment and install dependencies**
@@ -121,7 +121,7 @@ python scripts/run_evaluation.py
 ## Project Structure
 
 ```
-graphsentinel/
+graph-ai/                            # this repo
 ├── src/
 │   ├── system1_generator/          # G1–G4 + Scenario Engine: synthetic accounts, normal txns,
 │   │                               # laundering injection (10 typologies), split/export
@@ -194,7 +194,7 @@ To regenerate: run step 3a above. The generator is seeded (`seed: 42` in `config
 
 **vs published external benchmarks**
 
-| Benchmark | Reference value | GraphSentinel | Δ (we minus benchmark) |
+| Benchmark | Reference value | G.R.A.P.H AI | Δ (we minus benchmark) |
 |---|---:|---:|---:|
 | Tide LI — LightGBM PR-AUC | 78.05 | **81.69** | **+3.64** |
 | Tide HI — XGBoost PR-AUC | 85.12 | 81.69 | −3.43 |

@@ -1,4 +1,4 @@
-"""Smoke tests for the GRAPH.AI FastAPI surface.
+"""Smoke tests for the G.R.A.P.H AI FastAPI surface.
 
 These don't exercise the SSE stream end-to-end (would require a running event
 loop with a real generator task). They just confirm every router is mounted
@@ -22,7 +22,7 @@ def test_root_lists_endpoints(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.json()
-    assert body["name"] == "GRAPH.AI"
+    assert body["name"] == "G.R.A.P.H AI"
     assert "/generator/start" in body["endpoints"]
     assert "/stream/events" in body["endpoints"]
     assert "/alerts" in body["endpoints"]

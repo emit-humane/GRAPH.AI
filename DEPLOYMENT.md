@@ -15,19 +15,19 @@ Backend on Render
   2. Render → "New" → "Blueprint" → pick this repo, branch=main
      (Render reads render.yaml and creates the web service + Postgres)
   3. Wait for the build (~15 min — torch + torch-geometric are heavy)
-  4. Note the backend URL  → https://graphai-backend.onrender.com
+  4. Note the backend URL  → https://graph-ai-backend.onrender.com
 
 Frontend on Vercel
   5. Vercel → "Add New" → "Project" → import the GitHub repo
      - Framework preset:  Next.js
      - Root directory:    frontend/
   6. Environment Variables:
-       NEXT_PUBLIC_BACKEND_URL = https://graphai-backend.onrender.com
+       NEXT_PUBLIC_BACKEND_URL = https://graph-ai-backend.onrender.com
   7. Deploy
 
 Lock down CORS
-  8. Back in Render → graphai-backend → Environment:
-       FRONTEND_ORIGIN = https://graphai.vercel.app
+  8. Back in Render → graph-ai-backend → Environment:
+       FRONTEND_ORIGIN = https://graph-ai.vercel.app
      (use your actual Vercel URL; comma-separated list is allowed)
   9. Trigger a manual redeploy (env vars only take effect on restart)
 ```
@@ -55,8 +55,8 @@ The repo ships with `render.yaml`. On Render:
 
 1. **New → Blueprint**
 2. Select this repository, branch `main`
-3. Render reads `render.yaml`, creates `graphai-backend` (web service) +
-   `graphai-alerts-db` (Postgres) in one click
+3. Render reads `render.yaml`, creates `graph-ai-backend` (web service) +
+   `graph-ai-alerts-db` (Postgres) in one click
 4. First build runs `pip install -r requirements.txt` (15–20 min — torch is
    ~600 MB, torch-geometric extensions another ~200 MB)
 5. Health check: `GET /health` should return 200 once the build is up
@@ -82,7 +82,7 @@ headroom for the Studio's bulk-injection paths.
 | `PYTHONIOENCODING` | `utf-8` | safe for the Indian-numeric labels |
 | `PYTHONUNBUFFERED` | `1` | flush logs to Render dashboard in real time |
 | `FRONTEND_ORIGIN` | `*` | set to your Vercel URL post-deploy |
-| `DATABASE_URL` | from `graphai-alerts-db` | wired automatically by the Blueprint |
+| `DATABASE_URL` | from `graph-ai-alerts-db` | wired automatically by the Blueprint |
 | `BOOTSTRAP_ARTIFACTS_URL` | *(unset)* | optional — see below |
 
 ### Health check
@@ -120,16 +120,16 @@ make install
 bash scripts/run_all.sh
 
 # Package the artifacts/
-tar -czf graphai-artifacts.tar.gz artifacts/
+tar -czf graph-ai-artifacts.tar.gz artifacts/
 
 # Upload it somewhere public-readable. Examples:
-#   - GitHub Release asset:  gh release create v1.0 graphai-artifacts.tar.gz
-#   - Cloudflare R2:         wrangler r2 object put public/graphai-artifacts.tar.gz --file=...
-#   - S3:                    aws s3 cp graphai-artifacts.tar.gz s3://bucket/ --acl public-read
+#   - GitHub Release asset:  gh release create v1.0 graph-ai-artifacts.tar.gz
+#   - Cloudflare R2:         wrangler r2 object put public/graph-ai-artifacts.tar.gz --file=...
+#   - S3:                    aws s3 cp graph-ai-artifacts.tar.gz s3://bucket/ --acl public-read
 ```
 
 **On Render:**
-1. Service → Environment → add `BOOTSTRAP_ARTIFACTS_URL=https://your-cdn/graphai-artifacts.tar.gz`
+1. Service → Environment → add `BOOTSTRAP_ARTIFACTS_URL=https://your-cdn/graph-ai-artifacts.tar.gz`
 2. Manual deploy → the build runs `scripts/bootstrap_artifacts.sh`, which
    `curl`s + extracts the tarball before `uvicorn` starts.
 
@@ -166,7 +166,7 @@ most clearly carries IP.
 5. **Build & dev settings:** all defaults
 6. **Environment Variables:**
    ```
-   NEXT_PUBLIC_BACKEND_URL=https://graphai-backend.onrender.com
+   NEXT_PUBLIC_BACKEND_URL=https://graph-ai-backend.onrender.com
    ```
    (use your actual Render URL; both Preview and Production environments)
 7. Deploy
@@ -205,11 +205,11 @@ forwards to the Render backend. This means:
 boot. As soon as you know your Vercel URL, change it:
 
 ```
-Render → graphai-backend → Environment → FRONTEND_ORIGIN
-    https://graphai.vercel.app
+Render → graph-ai-backend → Environment → FRONTEND_ORIGIN
+    https://graph-ai.vercel.app
 
 (or multiple, comma-separated:)
-    https://graphai.vercel.app,https://graphai-*.vercel.app
+    https://graph-ai.vercel.app,https://graph-ai-*.vercel.app
 ```
 
 When `FRONTEND_ORIGIN` is anything other than `*`, the backend also
@@ -224,23 +224,23 @@ After both deploys are live:
 
 ```bash
 # 1. Backend health
-curl https://graphai-backend.onrender.com/health
+curl https://graph-ai-backend.onrender.com/health
 # expect: {"status":"ok","generator_running":false,...}
 
 # 2. Backend layer availability
-curl https://graphai-backend.onrender.com/generator/status | jq .layers_available
+curl https://graph-ai-backend.onrender.com/generator/status | jq .layers_available
 # Should report supervised/anomaly/tgn = true when artifacts are present.
 
 # 3. Frontend reachable
-curl -I https://graphai.vercel.app
+curl -I https://graph-ai.vercel.app
 # expect: HTTP/2 200
 
 # 4. Frontend → Backend proxy
-curl https://graphai.vercel.app/api/health
+curl https://graph-ai.vercel.app/api/health
 # expect: same JSON as step 1 (proves the rewrite works)
 
 # 5. Live stream
-curl -N https://graphai.vercel.app/api/stream/events
+curl -N https://graph-ai.vercel.app/api/stream/events
 # expect: stays open, periodic comments / events as the generator runs
 ```
 

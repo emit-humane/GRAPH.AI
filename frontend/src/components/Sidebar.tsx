@@ -24,7 +24,7 @@ export default function Sidebar() {
           GA
         </div>
         <div>
-          <div className="text-[10px] tracking-[0.2em] font-mono text-textDim">G.R.A.P.H. AI</div>
+          <div className="text-[10px] tracking-[0.2em] font-mono text-textDim">G.R.A.P.H AI</div>
           <div className="text-[13px] font-bold leading-tight">Graph-based Risk Analysis &amp; Pattern Hunting</div>
         </div>
       </div>

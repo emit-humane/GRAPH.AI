@@ -3,7 +3,7 @@ import Sidebar from "@/components/Sidebar";
 import { ReactNode } from "react";
 
 export const metadata = {
-  title: "GRAPH.AI",
+  title: "G.R.A.P.H AI",
   description: "Graph-based Risk Analysis & Pattern Hunting",
 };
 

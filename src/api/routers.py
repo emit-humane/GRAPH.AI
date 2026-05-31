@@ -1,4 +1,4 @@
-"""All HTTP + SSE routers for the GRAPH.AI backend.
+"""All HTTP + SSE routers for the G.R.A.P.H AI backend.
 
 Routers in this module:
     * generator     — start / stop / status
@@ -1359,8 +1359,8 @@ def _render_pdf(report: dict[str, Any]) -> bytes:
         buf, pagesize=A4,
         leftMargin=15 * mm, rightMargin=15 * mm,
         topMargin=15 * mm, bottomMargin=15 * mm,
-        title=f"GRAPH.AI Fraud Report {case_id}",
-        author="GRAPH.AI", subject="FIU Filing Preview",
+        title=f"G.R.A.P.H AI Fraud Report {case_id}",
+        author="G.R.A.P.H AI", subject="FIU Filing Preview",
     )
     body: list = []
 
@@ -1368,7 +1368,7 @@ def _render_pdf(report: dict[str, Any]) -> bytes:
     # 1. Header band
     # =====================================================================
     header_rows = [[
-        Paragraph("<font color='#34d399'><b>G.R.A.P.H. AI</b></font> &nbsp;-&nbsp; FIU Filing Preview",
+        Paragraph("<font color='#34d399'><b>G.R.A.P.H AI</b></font> &nbsp;-&nbsp; FIU Filing Preview",
                   ParagraphStyle("hdr", parent=body_st, textColor=C_INK, fontSize=10)),
         Paragraph(_safe(f"Generated: {report.get('generated_at', '')[:19]} UTC"),
                   ParagraphStyle("hdr_r", parent=body_dim, alignment=2, fontSize=8)),

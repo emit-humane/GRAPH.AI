@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GRAPH.AI / iDEA 2.0 -- full cold pipeline.
+# G.R.A.P.H AI / iDEA 2.0 -- full cold pipeline.
 #
 # Orchestrates the entire detector from a fresh clone: System 1 generation,
 # Layer 2-5 offline training, full online inference over the stream, System 3

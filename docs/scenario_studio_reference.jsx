@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 
 // ============================================================================
-// GRAPH.AI — Scenario Studio (control panel preview)
+// G.R.A.P.H AI — Scenario Studio (control panel preview)
 // Pattern-level controllable transaction generator.
 // One engine; two entry points: LIVE inject into stream, or EXPORT to CSV.
 // This preview computes a deterministic plan locally so you can see the
@@ -274,7 +274,7 @@ export default function ScenarioStudio() {
     <div style={{ background: C.bg, color: C.text, fontFamily: DISPLAY, minHeight: "100vh", padding: "28px 32px" }}>
       <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-      <div style={{ fontSize: 11, letterSpacing: 3, fontFamily: MONO, color: C.dim, marginBottom: 8 }}>G.R.A.P.H. AI · SCENARIO STUDIO</div>
+      <div style={{ fontSize: 11, letterSpacing: 3, fontFamily: MONO, color: C.dim, marginBottom: 8 }}>G.R.A.P.H AI · SCENARIO STUDIO</div>
       <h1 style={{ fontSize: 32, fontWeight: 700, margin: "0 0 6px" }}>Controllable Transaction Generator</h1>
       <p style={{ color: C.dim, fontSize: 14, maxWidth: 720, marginBottom: 24, lineHeight: 1.6 }}>
         Pick a laundering typology, tune its parameters, and either inject it into the live stream or append it to an exportable labeled dataset. Same engine, both entry points.
