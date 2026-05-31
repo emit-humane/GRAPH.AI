@@ -239,23 +239,9 @@ def build_graph_router(state: AppState) -> APIRouter:
         neighborhood = list(evidence.get("two_hop_neighborhood") or [])
         edge_samples = list(evidence.get("two_hop_edge_list_sample") or [])
 
-        nodes_set: set[str] = {sender, receiver}
-        nodes_set.update(neighborhood[:20])
-        nodes_set.discard("")
-
-        nodes = [
-            {
-                "data": {
-                    "id": n,
-                    "label": n[:8] if isinstance(n, str) else str(n),
-                    "is_focal": n in (sender, receiver),
-                    "is_sender": n == sender,
-                    "is_receiver": n == receiver,
-                },
-            }
-            for n in nodes_set
-        ]
-
+        # Build the edge list FIRST so we know every endpoint we need; the node
+        # set is then guaranteed to be a superset of every edge's {source, target}.
+        # Cytoscape throws on orphan edges otherwise.
         edges: list[dict] = []
         if sender and receiver:
             edges.append({
@@ -272,15 +258,40 @@ def build_graph_router(state: AppState) -> APIRouter:
                 u, v, ts, amt = edge[0], edge[1], edge[2], edge[3]
             except Exception:
                 continue
+            u_s, v_s = str(u), str(v)
+            if not u_s or not v_s:
+                continue
             edges.append({
                 "data": {
-                    "id": f"e-{i}-{u}-{v}",
-                    "source": str(u), "target": str(v),
+                    "id": f"e-{i}-{u_s}-{v_s}",
+                    "source": u_s, "target": v_s,
                     "amount": float(amt),
                     "timestamp": str(ts),
                     "is_focal": False,
                 },
             })
+
+        # Now derive the node set: sender + receiver + capped neighbourhood +
+        # every endpoint that any retained edge actually references.
+        nodes_set: set[str] = {sender, receiver}
+        nodes_set.update(neighborhood[:20])
+        for e in edges:
+            nodes_set.add(e["data"]["source"])
+            nodes_set.add(e["data"]["target"])
+        nodes_set.discard("")
+
+        nodes = [
+            {
+                "data": {
+                    "id": n,
+                    "label": n[:8] if isinstance(n, str) else str(n),
+                    "is_focal": n in (sender, receiver),
+                    "is_sender": n == sender,
+                    "is_receiver": n == receiver,
+                },
+            }
+            for n in nodes_set
+        ]
 
         return {
             "transaction_id": tx_id,
@@ -394,8 +405,32 @@ def _country_coord(country: str | None, account_id: str = "") -> tuple[str, floa
 def build_geo_router(state: AppState) -> APIRouter:
     r = APIRouter(prefix="/geo", tags=["geo"])
 
+    # Account → most-recent country seen on the live stream. Populated lazily
+    # from state.recent_events on every /geo/case call so 2-hop neighbours that
+    # the focal event only references by id still get projected to the correct
+    # country instead of being clobbered to an Indian centroid.
+    def _country_index() -> dict[str, str]:
+        idx: dict[str, str] = {}
+        # Older events first; later wins so we always have the latest country
+        for ev in reversed(state.recent_events):
+            sa, sc = ev.get("sender_account"), ev.get("sender_country")
+            ra, rc = ev.get("receiver_account"), ev.get("receiver_country")
+            if sa and sc:
+                idx[sa] = sc
+            if ra and rc:
+                idx[ra] = rc
+        # Multigraph node attrs as a fallback (offline-built graph carries them)
+        if state.graph_updater is not None and state.graph_updater.G is not None:
+            for node, attrs in state.graph_updater.G.nodes(data=True):
+                if node in idx:
+                    continue
+                country = attrs.get("country") or attrs.get("home_country")
+                if isinstance(country, str) and len(country) == 2:
+                    idx[node] = country.upper()
+        return idx
+
     @r.get("/case/{tx_id}")
-    def case_geo(tx_id: str) -> dict[str, Any]:
+    def case_geo(tx_id: str, context: int = Query(default=20, ge=0, le=80)) -> dict[str, Any]:
         # Find the buffered event for this transaction
         payload = None
         for ev in state.recent_events:
@@ -412,35 +447,75 @@ def build_geo_router(state: AppState) -> APIRouter:
         s_city, s_lat, s_lng = _country_coord(s_country, sender)
         r_city, r_lat, r_lng = _country_coord(r_country, receiver)
 
-        # 2-hop neighbourhood from the TGN evidence, projected the same way
+        # 2-hop neighbourhood from the TGN evidence, projected with their
+        # ACTUAL country when we can find one in the stream / multigraph.
         evidence = payload.get("subgraph_evidence") or {}
         neighborhood = list(evidence.get("two_hop_neighborhood") or [])
+        country_idx = _country_index()
 
-        # Build nodes
         seen: set[str] = set()
         nodes: list[dict] = []
-        def _add(acc: str, lat: float, lng: float, city: str, is_focal: bool):
-            if acc in seen or not acc:
+
+        def _add(acc: str, lat: float, lng: float, city: str, *, kind: str):
+            """kind ∈ {"focal", "neighbour", "context"} — drives the marker style."""
+            if not acc or acc in seen:
                 return
             seen.add(acc)
             nodes.append({
                 "account_id": acc,
                 "city": city,
                 "lat": lat, "lng": lng,
-                "is_focal": is_focal,
+                "is_focal": kind == "focal",
+                "kind": kind,
+                "country": (country_idx.get(acc) or "").upper() or None,
             })
 
-        _add(sender, s_lat, s_lng, s_city, True)
-        _add(receiver, r_lat, r_lng, r_city, True)
-        for n in neighborhood[:16]:
-            city, lat, lng = _city_for_account(n)
-            _add(n, lat, lng, city, False)
+        def _project(acc: str, fallback_country: str | None = None) -> tuple[str, float, float]:
+            country = country_idx.get(acc) or fallback_country
+            return _country_coord(country, acc)
 
-        edges = [{
+        _add(sender, s_lat, s_lng, s_city, kind="focal")
+        _add(receiver, r_lat, r_lng, r_city, kind="focal")
+        for n in neighborhood[:16]:
+            city, lat, lng = _project(n)
+            _add(n, lat, lng, city, kind="neighbour")
+
+        edges: list[dict] = [{
             "source": sender, "target": receiver,
             "amount": payload.get("amount"),
             "is_focal": True,
+            "kind": "focal",
+            "risk_level": payload.get("risk_level"),
+            "transaction_id": tx_id,
         }]
+
+        # Other transactions happening around us — render as a third tier so
+        # the analyst sees the focal case in context, not in isolation. We
+        # take the most-recent N events excluding the focal case itself.
+        context_added = 0
+        for ev in state.recent_events:
+            if context_added >= context:
+                break
+            etx = ev.get("transaction_id")
+            if not etx or etx == tx_id:
+                continue
+            es, er = ev.get("sender_account"), ev.get("receiver_account")
+            if not (es and er):
+                continue
+            es_city, es_lat, es_lng = _country_coord(ev.get("sender_country"), es)
+            er_city, er_lat, er_lng = _country_coord(ev.get("receiver_country"), er)
+            _add(es, es_lat, es_lng, es_city, kind="context")
+            _add(er, er_lat, er_lng, er_city, kind="context")
+            edges.append({
+                "source": es, "target": er,
+                "amount": ev.get("amount"),
+                "is_focal": False,
+                "kind": "context",
+                "risk_level": ev.get("risk_level"),
+                "transaction_id": etx,
+                "alerted": bool(ev.get("alerted")),
+            })
+            context_added += 1
 
         return {
             "transaction_id": tx_id,
@@ -450,6 +525,8 @@ def build_geo_router(state: AppState) -> APIRouter:
                 "active_accounts": len(state.graph_updater.G.nodes()) if state.graph_updater is not None else 0,
                 "fraud_accounts": 2,
                 "fraud_edges": 1,
+                "context_edges": context_added,
+                "context_window": context,
             },
         }
 
@@ -477,10 +554,21 @@ def build_report_router(state: AppState) -> APIRouter:
     @r.get("/{tx_id}")
     def report_json(tx_id: str) -> dict[str, Any]:
         payload = _find_payload(tx_id)
+        narrative = _narrative(payload)
+        indicators = _indicators(payload)
+        timeline = _timeline(payload, state)
+        peer = _peer_comparison(payload, state)
+        recommendations = _recommendations(payload, indicators)
         return {
             "case_id": f"FRAUD_{tx_id[:10]}",
             "transaction": payload,
             "filing_notes": _filing_notes(payload),
+            "narrative": narrative,
+            "indicators": indicators,
+            "timeline": timeline,
+            "peer_comparison": peer,
+            "recommendations": recommendations,
+            "regulatory_context": _regulatory_context(payload, indicators),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -535,6 +623,400 @@ def _filing_notes(payload: dict[str, Any]) -> str:
         f"Recommendation: continue tracing downstream beneficiaries and review the "
         f"community-level pattern before SAR escalation."
     )
+
+
+# --------------------------------------------------------------------------- #
+# Human-readable report enrichment
+# --------------------------------------------------------------------------- #
+
+
+# Plain-English summary per L1 rule. Used to build the indicator cards on the
+# fraud report so an investigator doesn't have to look up "R02" in a manual.
+_RULE_HUMAN: dict[str, dict[str, str]] = {
+    "R01": {"label": "High-value transfer",         "severity": "Medium", "regulatory": "RBI CTR threshold (>= INR 10 lakh)"},
+    "R02": {"label": "Structuring (smurfing)",      "severity": "High",   "regulatory": "PMLA §3 — designed to evade reporting"},
+    "R03": {"label": "Velocity spike",              "severity": "Medium", "regulatory": "FATF Rec 10 — unusual activity pattern"},
+    "R04": {"label": "Dormant-account activation",  "severity": "High",   "regulatory": "RBI Master Direction on KYC §VI(2)"},
+    "R05": {"label": "Impossible travel",           "severity": "High",   "regulatory": "Account-takeover indicator"},
+    "R06": {"label": "High-risk jurisdiction",      "severity": "Medium", "regulatory": "FATF high-risk / monitored list"},
+    "R07": {"label": "Device anomaly",              "severity": "Medium", "regulatory": "Account-takeover / mule indicator"},
+    "R08": {"label": "Shared device across IDs",    "severity": "High",   "regulatory": "PMLA — synthetic-identity flag"},
+    "R09": {"label": "Excessive beneficiaries",     "severity": "Medium", "regulatory": "FATF Rec 10 — fan-out structure"},
+    "R10": {"label": "Cycle closure",               "severity": "Critical","regulatory": "Round-tripping / layering signature"},
+    "R11": {"label": "Round-amount structuring",    "severity": "Medium", "regulatory": "PMLA §3 — sub-threshold splitting"},
+    "R12": {"label": "KYC mismatch",                "severity": "High",   "regulatory": "RBI Master Direction on KYC §VII"},
+    "R13": {"label": "Benford-law anomaly",         "severity": "Medium", "regulatory": "Statistical fabrication indicator"},
+    "R14": {"label": "Fan-in aggregation",          "severity": "High",   "regulatory": "Aggregator-account / mule-network signature"},
+    "R15": {"label": "Layering-chain relay",        "severity": "Critical","regulatory": "Multi-hop layering (FATF Rec 10)"},
+}
+
+
+def _humanize_amount(amt: float) -> str:
+    """Indian-numbering-friendly amount string."""
+    a = float(amt)
+    if a >= 1e7:
+        return f"INR {a / 1e7:.2f} crore"
+    if a >= 1e5:
+        return f"INR {a / 1e5:.2f} lakh"
+    return f"INR {a:,.0f}"
+
+
+def _human_timestamp(ts: str | None) -> str:
+    if not ts:
+        return "unknown time"
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        return str(ts)
+    return dt.strftime("%d %b %Y, %H:%M:%S UTC")
+
+
+def _narrative(payload: dict[str, Any]) -> dict[str, str]:
+    """Multi-paragraph English summary the analyst can read top-to-bottom."""
+    amount = float(payload.get("amount", 0))
+    sender = payload.get("sender_account", "")
+    receiver = payload.get("receiver_account", "")
+    s_bank = payload.get("sender_bank", "—")
+    r_bank = payload.get("receiver_bank", "—")
+    s_country = payload.get("sender_country", "—")
+    r_country = payload.get("receiver_country", "—")
+    tx_type = payload.get("transaction_type", "—")
+    risk = float(payload.get("transaction_risk_score", 0))
+    risk_level = payload.get("risk_level", "Low")
+    group_risk = float(payload.get("group_risk_score", 0))
+    group_level = payload.get("risk_level_group", "Low")
+
+    what = (
+        f"On {_human_timestamp(payload.get('timestamp'))} an {tx_type} of "
+        f"{_humanize_amount(amount)} moved from {sender[:12]}… ({s_bank}, {s_country}) "
+        f"to {receiver[:12]}… ({r_bank}, {r_country})."
+    )
+
+    breakdown = payload.get("score_breakdown") or {}
+    scores = breakdown.get("scores") or {}
+    contribs = breakdown.get("weighted_contributions") or {}
+    # Identify the leading layer by weighted contribution
+    layer_names = {
+        "rule_score":       "the Layer-1 rule engine",
+        "graph_score":      "the Layer-2 graph analytics",
+        "supervised_score": "the Layer-3 supervised model",
+        "anomaly_score":    "the Layer-4 behavioural anomaly model",
+        "tgn_score":        "the Layer-5 temporal GNN",
+    }
+    leader = max(contribs.items(), key=lambda kv: kv[1]) if contribs else ("", 0.0)
+    leader_layer = layer_names.get(leader[0], "the fusion engine")
+
+    why = (
+        f"The detector fused five layers into a transaction risk score of {risk:.1f} ({risk_level}); "
+        f"community-level group score is {group_risk:.1f} ({group_level}). "
+        f"{leader_layer.capitalize()} contributed the most weight to the decision."
+    )
+
+    rules = payload.get("triggered_rules") or []
+    if rules:
+        rule_phrases = [
+            _RULE_HUMAN.get(r, {}).get("label", r) for r in rules[:5]
+        ]
+        rules_text = (
+            f"Layer-1 rules that fired on this transaction: {', '.join(rule_phrases)}."
+        )
+    else:
+        rules_text = "No Layer-1 rules fired; the alert is being driven by the ML/anomaly/graph layers."
+
+    next_steps = (
+        "Recommended next steps: (a) trace downstream beneficiaries via the Graph Explorer, "
+        "(b) review the sender community's risk profile in Geo, "
+        "(c) if patterns persist across multiple transactions, escalate to STR/SAR filing per PMLA §12."
+    )
+
+    return {
+        "what_happened": what,
+        "why_flagged": why,
+        "which_rules": rules_text,
+        "next_steps": next_steps,
+    }
+
+
+def _indicators(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """A structured list of plain-English red-flag items, each card-ready."""
+    out: list[dict[str, Any]] = []
+    amount = float(payload.get("amount", 0))
+
+    # Rule-driven indicators
+    for rid in payload.get("triggered_rules") or []:
+        spec = _RULE_HUMAN.get(rid)
+        if not spec:
+            continue
+        out.append({
+            "rule_id":  rid,
+            "title":    spec["label"],
+            "severity": spec["severity"],
+            "source":   "Layer 1 — Rule engine",
+            "regulatory": spec["regulatory"],
+            "detail":   _rule_detail(rid, payload),
+        })
+
+    # Graph / community indicators (Layer 2)
+    breakdown = payload.get("score_breakdown") or {}
+    if float(breakdown.get("scores", {}).get("graph_score", 0)) >= 60:
+        out.append({
+            "rule_id":  "L2-COMM",
+            "title":    "High sender-community risk",
+            "severity": "High",
+            "source":   "Layer 2 — Graph analytics",
+            "regulatory": "FATF Rec 10 — network-level scrutiny",
+            "detail":   f"Sender's community in the live multigraph carries a risk score of {breakdown['scores']['graph_score']:.1f}/100 — the community has been involved in suspicious flows.",
+        })
+    # Cycle closure shows up as triggered pattern
+    for p in payload.get("triggered_patterns") or []:
+        if "community_has_cycle" in p:
+            out.append({
+                "rule_id":  "L2-CYCLE",
+                "title":    "Directed cycle detected in sender community",
+                "severity": "Critical",
+                "source":   "Layer 2 — Graph analytics",
+                "regulatory": "Layering signature (FATF Rec 10)",
+                "detail":   "A round-tripping or layering loop is closing through this transaction's community — money returns to a related account.",
+            })
+            break
+
+    # Supervised (Layer 3) SHAP drivers
+    top_shap = payload.get("top_shap_features") or []
+    sup_score = float(breakdown.get("scores", {}).get("supervised_score", 0))
+    if sup_score >= 60 and top_shap:
+        out.append({
+            "rule_id":  "L3-ML",
+            "title":    "ML model flags high fraud probability",
+            "severity": "High" if sup_score < 80 else "Critical",
+            "source":   "Layer 3 — Supervised ML",
+            "regulatory": "Calibrated XGBoost on labelled warmup set",
+            "detail":   f"Score {sup_score:.1f}/100. Top drivers: {', '.join(top_shap[:5])}.",
+        })
+
+    # Anomaly (Layer 4)
+    anom_score = float(breakdown.get("scores", {}).get("anomaly_score", 0))
+    if anom_score >= 60:
+        out.append({
+            "rule_id":  "L4-ANOM",
+            "title":    "Behaviour deviates from sender's baseline",
+            "severity": "Medium" if anom_score < 80 else "High",
+            "source":   "Layer 4 — Behavioural anomaly",
+            "regulatory": "Unseen-pattern detector — Isolation Forest + LOF + Autoencoder",
+            "detail":   f"Anomaly score {anom_score:.1f}/100. The sender's recent activity profile differs from what the unsupervised models learned as 'normal' on the historical window.",
+        })
+
+    # TGN (Layer 5)
+    tgn_score = float(breakdown.get("scores", {}).get("tgn_score", 0))
+    if tgn_score >= 60:
+        out.append({
+            "rule_id":  "L5-TGN",
+            "title":    "Temporal-graph specialist flag",
+            "severity": "Medium",
+            "source":   "Layer 5 — TGN / GNN",
+            "regulatory": "Multi-edge & relay structure (MEGA-GNN)",
+            "detail":   f"TGN score {tgn_score:.1f}/100. The model's memory state for this account drifted in a way associated with laundering relays.",
+        })
+
+    # Sub-threshold structuring hint — amount just under reporting limit?
+    if 800_000 <= amount < 1_000_000:
+        out.append({
+            "rule_id":  "STRUCT-HINT",
+            "title":    "Amount just below CTR reporting threshold",
+            "severity": "Medium",
+            "source":   "Heuristic — sub-threshold splitting",
+            "regulatory": "RBI Cash Transaction Report threshold (INR 10 lakh)",
+            "detail":   f"Amount {_humanize_amount(amount)} is within INR 2 lakh of the INR 10 lakh CTR threshold; possible structuring intent.",
+        })
+
+    # Cross-border
+    if str(payload.get("sender_country", "")).upper() != str(payload.get("receiver_country", "")).upper():
+        out.append({
+            "rule_id":  "INTL",
+            "title":    "International transfer",
+            "severity": "Medium",
+            "source":   "Heuristic — cross-border",
+            "regulatory": "FATF cross-border wire-transfer standards",
+            "detail":   f"{payload.get('sender_country', '?')} → {payload.get('receiver_country', '?')}. Cross-border movement raises the prior on laundering risk.",
+        })
+
+    return out
+
+
+def _rule_detail(rule_id: str, payload: dict[str, Any]) -> str:
+    """Per-rule plain-English detail string."""
+    amount = float(payload.get("amount", 0))
+    if rule_id == "R01":
+        return f"Transaction amount {_humanize_amount(amount)} exceeds the high-value threshold of INR 10 lakh."
+    if rule_id == "R02":
+        return "Sender executed multiple sub-threshold transactions to the same beneficiary within 24h."
+    if rule_id == "R06":
+        return f"Counterparty country {payload.get('receiver_country', '?')} is on the FATF high-risk monitoring list."
+    if rule_id == "R10":
+        return "Adding this edge to the multigraph closes a directed cycle — funds return to an upstream account."
+    if rule_id == "R14":
+        return "Sender is one of ≥5 distinct accounts depositing similarly-sized amounts into one aggregator within 24h."
+    if rule_id == "R15":
+        return "This edge is part of a multi-hop chain where each hop forwards 85-100% of its inflow within 2 hours — classic layering relay."
+    spec = _RULE_HUMAN.get(rule_id, {})
+    return spec.get("label", rule_id)
+
+
+def _timeline(payload: dict[str, Any], state: AppState) -> list[dict[str, Any]]:
+    """Chronological list of recent activity touching the focal sender or receiver."""
+    sender = payload.get("sender_account")
+    receiver = payload.get("receiver_account")
+    focal_tx = payload.get("transaction_id")
+    accs = {sender, receiver} - {None, ""}
+    items: list[dict[str, Any]] = []
+    for ev in state.recent_events:
+        if ev.get("transaction_id") == focal_tx:
+            items.append({**_timeline_row(ev), "is_focal": True})
+            continue
+        if ev.get("sender_account") in accs or ev.get("receiver_account") in accs:
+            items.append({**_timeline_row(ev), "is_focal": False})
+        if len(items) >= 30:
+            break
+    # Chronological order (oldest first)
+    items.sort(key=lambda x: str(x.get("timestamp") or ""))
+    return items
+
+
+def _timeline_row(ev: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "transaction_id": ev.get("transaction_id"),
+        "timestamp":      ev.get("timestamp"),
+        "sender_account": ev.get("sender_account"),
+        "receiver_account": ev.get("receiver_account"),
+        "amount":         float(ev.get("amount", 0)),
+        "transaction_type": ev.get("transaction_type"),
+        "risk_score":     float(ev.get("transaction_risk_score", 0)),
+        "risk_level":     ev.get("risk_level"),
+        "alerted":        bool(ev.get("alerted")),
+    }
+
+
+def _peer_comparison(payload: dict[str, Any], state: AppState) -> dict[str, Any]:
+    """How does this tx compare to the sender's typical behaviour?"""
+    sender = payload.get("sender_account")
+    if not sender:
+        return {"available": False}
+    sent = [
+        float(ev.get("amount", 0))
+        for ev in state.recent_events
+        if ev.get("sender_account") == sender
+    ]
+    if not sent:
+        return {"available": False}
+    n = len(sent)
+    mean_ = sum(sent) / n
+    sorted_amts = sorted(sent)
+    median = sorted_amts[n // 2]
+    this_amount = float(payload.get("amount", 0))
+    multiple = (this_amount / mean_) if mean_ > 0 else 1.0
+    return {
+        "available":   True,
+        "sender":      sender,
+        "samples":     n,
+        "mean_amount": round(mean_, 2),
+        "median_amount": round(float(median), 2),
+        "max_amount":  round(max(sent), 2),
+        "this_amount": round(this_amount, 2),
+        "multiple_of_mean": round(multiple, 2),
+        "is_outlier":  multiple >= 3.0,
+    }
+
+
+def _recommendations(payload: dict[str, Any], indicators: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A checklist of next actions for the investigator."""
+    risk_level = payload.get("risk_level", "Low")
+    has_critical = any(i.get("severity") == "Critical" for i in indicators)
+    has_cycle = any(i.get("rule_id") == "L2-CYCLE" for i in indicators)
+    has_struct = any(i.get("rule_id") in ("R02", "STRUCT-HINT") for i in indicators)
+    has_intl = any(i.get("rule_id") == "INTL" for i in indicators)
+
+    recs: list[dict[str, Any]] = []
+    recs.append({
+        "id": "review-evidence",
+        "title": "Open the evidence package",
+        "detail": "Download the .zip below for a full JSON + PDF audit trail.",
+        "priority": "High",
+    })
+    if has_cycle:
+        recs.append({
+            "id": "trace-cycle",
+            "title": "Trace the closed cycle",
+            "detail": "Use the Graph Explorer to expand the 2-hop neighborhood; verify all nodes in the loop, including the starting account.",
+            "priority": "Critical",
+        })
+    if has_struct:
+        recs.append({
+            "id": "aggregate-24h",
+            "title": "Aggregate sender's last 24h activity",
+            "detail": "Sum all sender→same-beneficiary transfers in the last 24 hours; check if the cumulative amount crosses the INR 10 lakh CTR threshold.",
+            "priority": "High",
+        })
+    if has_intl:
+        recs.append({
+            "id": "fema-check",
+            "title": "Cross-check FEMA / outward-remittance limits",
+            "detail": "Verify the sender's outward remittance limit under LRS (USD 250k / FY) and the receiving counterparty's KYC posture in the foreign jurisdiction.",
+            "priority": "Medium",
+        })
+    if has_critical or risk_level == "Critical":
+        recs.append({
+            "id": "freeze",
+            "title": "Consider 7-day transactional hold",
+            "detail": "Per PMLA §17, the bank may impose a 7-day operational hold pending FIU-IND directive when laundering is reasonably suspected.",
+            "priority": "Critical",
+        })
+    recs.append({
+        "id": "str-filing",
+        "title": "Prepare STR filing (FIU-IND)",
+        "detail": "If pattern persists across multiple transactions: file an STR through FIU-IND's FINGate / FINnet within 7 days of forming the suspicion (PMLA §12 + Rule 3 of PMLR).",
+        "priority": "High" if risk_level in ("High", "Critical") else "Medium",
+    })
+    recs.append({
+        "id": "kyc-refresh",
+        "title": "Trigger Customer Due Diligence refresh",
+        "detail": "Force a KYC refresh on the sender via the bank's CDD workflow per RBI Master Direction on KYC §VI.",
+        "priority": "Medium",
+    })
+    return recs
+
+
+def _regulatory_context(payload: dict[str, Any], indicators: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Citations the report card surfaces to the analyst."""
+    cites: list[dict[str, str]] = [
+        {
+            "code":  "PMLA §12 + PMLR Rule 3",
+            "title": "STR filing duty",
+            "detail": "Banking companies must report suspicious transactions to FIU-IND within 7 working days of forming the suspicion.",
+        },
+        {
+            "code":  "RBI Master Direction on KYC (2016, latest amend. 2024)",
+            "title": "Customer Due Diligence",
+            "detail": "Mandates ongoing customer due diligence and enhanced due diligence for high-risk customers and jurisdictions.",
+        },
+        {
+            "code":  "FATF Recommendation 10",
+            "title": "Customer Due Diligence & ongoing monitoring",
+            "detail": "Financial institutions must monitor transactions throughout the business relationship and scrutinise complex / unusual patterns.",
+        },
+    ]
+    # Add CTR/cross-border citations only when relevant
+    if any(i.get("rule_id") in ("R01", "STRUCT-HINT") for i in indicators):
+        cites.append({
+            "code":  "RBI Master Direction on KYC §VII (CTR)",
+            "title": "Cash Transaction Report — INR 10 lakh threshold",
+            "detail": "Every cash transaction at or above INR 10 lakh, or series aggregating to the same in a calendar month, must be reported to FIU-IND.",
+        })
+    if any(i.get("rule_id") == "INTL" for i in indicators):
+        cites.append({
+            "code":  "FEMA, 1999 + RBI LRS",
+            "title": "Foreign Exchange Management Act / Liberalised Remittance Scheme",
+            "detail": "Outward remittances from resident individuals are capped at USD 250,000 per financial year under LRS; cross-border movement requires KYC verification at both ends.",
+        })
+    return cites
 
 
 def _render_pdf(payload: dict[str, Any], notes: str) -> bytes:
@@ -605,8 +1087,43 @@ def _render_pdf(payload: dict[str, Any], notes: str) -> bytes:
         body.append(Paragraph(line.replace("•", "&bull;"), styles["Normal"]))
     body.append(Spacer(1, 4 * mm))
 
+    # ---- Red-flag indicators table ---------------------------------------- #
+    indicators = _indicators(payload)
+    if indicators:
+        body.append(Paragraph("<b>Red-flag indicators</b>", styles["Heading3"]))
+        irows = [["Source", "Indicator", "Severity"]]
+        for ind in indicators[:14]:
+            irows.append([
+                ind.get("source", ""),
+                ind.get("title", ""),
+                ind.get("severity", ""),
+            ])
+        itbl = Table(irows, colWidths=[55 * mm, 80 * mm, 25 * mm])
+        itbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2940")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        body.append(itbl)
+        body.append(Spacer(1, 4 * mm))
+
     body.append(Paragraph("<b>Suggested Filing Notes</b>", styles["Heading3"]))
     body.append(Paragraph(notes, styles["Normal"]))
+
+    # ---- Regulatory citations -------------------------------------------- #
+    cites = _regulatory_context(payload, indicators)
+    if cites:
+        body.append(Spacer(1, 4 * mm))
+        body.append(Paragraph("<b>Regulatory context</b>", styles["Heading3"]))
+        for c in cites:
+            body.append(Paragraph(
+                f"<b>{c['code']}</b> — {c['title']}: {c['detail']}",
+                styles["Normal"],
+            ))
+            body.append(Spacer(1, 1 * mm))
 
     doc.build(body)
     return buf.getvalue()

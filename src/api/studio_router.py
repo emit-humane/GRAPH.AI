@@ -30,6 +30,7 @@ from src.system1_generator.scenario_engine import (
     TYPOLOGIES,
 )
 
+from . import generator as gen_module
 from .state import AppState
 
 logger = logging.getLogger(__name__)
@@ -100,10 +101,8 @@ def build_studio_router(state: AppState) -> APIRouter:
         }
 
     @r.post("/inject")
-    def inject(body: PlanRequest) -> dict[str, Any]:
-        if not state.generator_status.get("running"):
-            # Allowed — but warn so the operator knows nothing will flow yet
-            _log(state, f"injected {body.count}× {body.typology} (generator stopped)", "warn")
+    async def inject(body: PlanRequest) -> dict[str, Any]:
+        # Build the plan first so a 404 happens before we touch the queue.
         try:
             plans = engine.build_plan(body.typology, body.params, body.seed, body.count)
         except KeyError as exc:
@@ -112,6 +111,22 @@ def build_studio_router(state: AppState) -> APIRouter:
         state.studio_injection_queue.extend(events)
         n_edges = sum(len(p.edges) for p in plans)
         total = sum(p.total_value() for p in plans)
+
+        # Auto-start the generator if it's not running. The injection queue is
+        # drained by ``generator_loop`` — without a running loop, queued events
+        # never reach the pipeline and the operator sees ``events_emitted``
+        # stuck at the pre-inject count. Match operator intent: clicking
+        # Inject means "I want to see these flow through".
+        auto_started = False
+        if not state.generator_status.get("running"):
+            await gen_module.start_generator(state)
+            auto_started = True
+            _log(
+                state,
+                f"Auto-started generator to flush {len(events)} queued events",
+                "warn",
+            )
+
         _log(
             state,
             f"Injected {body.count}× {body.typology} "
@@ -122,6 +137,8 @@ def build_studio_router(state: AppState) -> APIRouter:
             "queued_events": len(events),
             "plans": [plan.to_dict() for plan in plans],
             "queue_depth": len(state.studio_injection_queue),
+            "generator_running": bool(state.generator_status.get("running")),
+            "generator_auto_started": auto_started,
         }
 
     @r.post("/export")

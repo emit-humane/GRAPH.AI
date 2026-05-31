@@ -35,7 +35,7 @@ export default function GeoPage() {
     <div className="max-w-5xl mx-auto">
       <ViewHeader
         title="Geographical View"
-        sub="The accounts and edges involved in the selected case, projected onto an India base map."
+        sub="The focal case + its 2-hop network + recent background traffic, projected globally. Arrows show direction of transfer."
       />
 
       <Panel className="mb-4">
@@ -44,16 +44,17 @@ export default function GeoPage() {
             <Label>Geographical View</Label>
             <SectionTitle>Fraud Geography Map</SectionTitle>
           </div>
-          <PillNote>Focal nodes pulse in pink, network in green</PillNote>
+          <PillNote>Pink = focal · green = 2-hop · amber = other alerts · blue = background traffic</PillNote>
         </div>
         {err && <div className="text-high text-sm font-mono mb-2">{err}</div>}
         {data ? (
           <>
             <IndiaMap nodes={data.nodes} edges={data.edges} height={460} />
-            <div className="grid grid-cols-3 gap-3.5 mt-4">
+            <div className="grid grid-cols-4 gap-3.5 mt-4">
               <Panel className="p-4"><Stat label="Active Accounts" value={data.metadata.active_accounts.toLocaleString()} /></Panel>
               <Panel className="p-4"><Stat label="Fraud Accounts" value={data.metadata.fraud_accounts} valueColor="#e23d6e" /></Panel>
               <Panel className="p-4"><Stat label="Fraud Edges" value={data.metadata.fraud_edges} valueColor="#d99a2b" /></Panel>
+              <Panel className="p-4"><Stat label="Context Tx Shown" value={data.metadata.context_edges ?? 0} valueColor="#3b82f6" /></Panel>
             </div>
           </>
         ) : (
