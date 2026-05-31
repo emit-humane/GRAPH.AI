@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -68,14 +69,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="GRAPH.AI Backend", version="1.0.0", lifespan=lifespan)
 app.state.appstate = _STATE
 
-# CORS — open for local dev (frontend at :3000)
+# CORS — env-driven so the deployed backend can restrict to the Vercel
+# domain in production. ``FRONTEND_ORIGIN`` may be a comma-separated list.
+# Default ``*`` keeps local dev (frontend at :3000) friction-free but the
+# Render Blueprint sets this to the Vercel URL on deploy.
+#
+# Note: CORS spec forbids the combination ``allow_origins=["*"]`` AND
+# ``allow_credentials=True`` — browsers reject the response. We default to
+# credentials off (we don't use cookies; SSE + bearer-free fetch works fine).
+_origin_env = os.environ.get("FRONTEND_ORIGIN", "*").strip()
+_origins = [o.strip() for o in _origin_env.split(",") if o.strip()]
+_allow_credentials = _origins != ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+logger.info("[api] CORS origins=%s credentials=%s", _origins, _allow_credentials)
 
 
 @app.get("/")

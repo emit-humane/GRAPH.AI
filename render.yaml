@@ -1,0 +1,71 @@
+# Render Blueprint — backend deploy.
+#
+# Apply with: from the Render dashboard, "New > Blueprint" -> point at this
+# repo's branch. Render will create the web service AND the (optional)
+# Postgres + persistent disk in one click.
+#
+# Hardware:
+#   The 5-layer pipeline needs ~1.5-2 GB RAM at steady state (torch +
+#   multigraph + TGN memory + supervised models). Free / starter tiers
+#   (512 MB / 1 GB) WILL crash on first request. ``standard`` (2 GB) is
+#   the minimum; ``pro`` (4 GB) is comfortable. Override
+#   ``RENDER_INSTANCE_TYPE`` here if you upgrade.
+#
+# Artifact bootstrap:
+#   The detector requires ~72 MB of trained artifacts in artifacts/. Either
+#     (a) commit them via Git LFS, OR
+#     (b) set ``BOOTSTRAP_ARTIFACTS_URL`` to a public tarball URL — the
+#         pre-deploy command will fetch + extract it, OR
+#     (c) leave both unset and the API boots in "rules-only" degraded mode
+#         (L1 rules + L2 live graph features still work; L3/L4/L5 disabled).
+
+services:
+  - type: web
+    name: graphai-backend
+    runtime: python
+    plan: standard                         # 2 GB RAM, $25/mo — minimum for full layers
+    region: singapore                      # closest to IN demo audience; ohio also fine
+    branch: main
+    rootDir: .
+    pythonVersion: "3.11"
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      # Optionally pull pre-trained artifacts at build time (faster cold-start
+      # than runtime). No-op when the env var is unset.
+      bash scripts/bootstrap_artifacts.sh || true
+    startCommand: |
+      uvicorn src.api.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHONIOENCODING
+        value: utf-8
+      - key: PYTHONPATH
+        value: .
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # CORS — set to your Vercel deployment URL (see DEPLOYMENT.md).
+      # Wildcard works for demo but blocks credentialed requests.
+      - key: FRONTEND_ORIGIN
+        value: "*"
+      # Persistence — point at the Postgres instance below if you keep it;
+      # otherwise leave unset and the API falls back to SQLite (ephemeral on
+      # Render disks unless you also attach a Render Disk).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: graphai-alerts-db
+          property: connectionString
+      # Optional artifact bootstrap — see DEPLOYMENT.md for the tarball layout.
+      # - key: BOOTSTRAP_ARTIFACTS_URL
+      #   value: "https://your-cdn/graphai-artifacts-v1.tar.gz"
+
+# Optional Postgres for the alerts table. SQLite at logs/alerts.db works too
+# (handy for one-off demos) but is wiped every deploy unless attached to a
+# Render Disk. Postgres is the right choice for any persistent / multi-deploy
+# scenario.
+databases:
+  - name: graphai-alerts-db
+    plan: free                             # 1 GB, fine for the alerts table
+    region: singapore
+    postgresMajorVersion: "16"

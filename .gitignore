@@ -1,7 +1,16 @@
 .venv/
 __pycache__/
 *.pyc
-data/
+# Ignore generated data files but allow specific tracked exceptions. We use
+# data/* (not data/) so the directory is still walked and the !exceptions
+# below take effect.
+data/*
+# Tracked exception: the verification probe stream + manifest is a
+# version-controlled input the deployed backend serves at
+# GET /generator/sample_probe_csv. Keep these inside data/ so the
+# frontend's CsvInjector can fetch them straight from the API.
+!data/verification_probes.csv
+!data/verification_probes.manifest.json
 artifacts/
 logs/
 .env

@@ -1,0 +1,630 @@
+{
+  "generated_at": "2026-05-31T13:05:44.427687+00:00",
+  "total_events": 213,
+  "total_probes": 28,
+  "schema": [
+    "transaction_id",
+    "timestamp",
+    "sender_account",
+    "receiver_account",
+    "sender_bank",
+    "receiver_bank",
+    "sender_country",
+    "receiver_country",
+    "amount",
+    "currency",
+    "transaction_type",
+    "payment_channel",
+    "device_id",
+    "ip_address",
+    "geo_latitude",
+    "geo_longitude",
+    "merchant_category",
+    "transaction_status",
+    "sender_balance_before",
+    "sender_balance_after",
+    "receiver_balance_before",
+    "receiver_balance_after",
+    "kyc_level",
+    "is_international",
+    "remarks",
+    "amount_leading_digit"
+  ],
+  "probes": [
+    {
+      "probe_name": "R01-high-value",
+      "layer": "L1",
+      "description": "Single tx of INR 25 lakh must trip R01 (high-value).",
+      "expected_rules": [
+        "R01"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "71aeacba-5a30-46a3-8d25-e09e864c1a80"
+      ],
+      "event_count": 1
+    },
+    {
+      "probe_name": "R02-structuring",
+      "layer": "L1",
+      "description": "12 sub-threshold (900k-955k) txns within 1h.",
+      "expected_rules": [
+        "R02",
+        "R03"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "e003226e-f5b6-4cc0-90d0-67a7068bc6d8",
+        "d940361f-2661-4bf6-8b95-de8214070109",
+        "d1f940ea-8ef6-4eb1-9ac8-791b790f40d6",
+        "8126a5f7-35e7-437d-baa5-44bca4effafc",
+        "24a03e16-e9f3-449a-b52e-4ce7b9dd471a",
+        "0b77319d-7a8f-4f8b-8992-f9f7238bf5d8",
+        "b3032e53-29a0-4fff-851c-451a176cd415",
+        "5d280fea-7a49-4f96-b95a-c73102bf475b",
+        "e25c46d4-9647-4e61-bb1c-d27c9c7e60ee",
+        "5b8b30e3-c45f-40a6-b148-123b6b77fa73",
+        "04f92e89-dc6c-4460-b3e1-e6834cbb6ac9",
+        "2dbbb798-7c9b-4656-9661-d1adc24a9248"
+      ],
+      "event_count": 12
+    },
+    {
+      "probe_name": "R03-velocity-spike",
+      "layer": "L1",
+      "description": "11 tx from one sender within 55 minutes (>10/h cap).",
+      "expected_rules": [
+        "R03"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "0cc1523b-c380-4730-8e1a-59f626342373",
+        "5e061433-045f-4a1c-aac9-da501b8319d2",
+        "6cce8e81-57ab-44a8-8888-089a5e757170",
+        "a8049f94-94e8-4f63-bd1f-75391201b90d",
+        "5e76df75-d8bb-47de-807b-fc78a6f41ef6",
+        "0989f370-e729-45e9-ac56-0b8961386927",
+        "0d4225ee-dfdf-41c8-87e9-1ff963322913",
+        "1e5c8393-8974-4ef8-9e8b-b5595e0c8e61",
+        "ae0a9910-8670-4389-9c0a-a6f3326c6c43",
+        "6a6a68dd-712a-40b5-b594-3f45392c04fa",
+        "9c1e79bb-e4b0-492c-9e49-60084f789dbf"
+      ],
+      "event_count": 11
+    },
+    {
+      "probe_name": "R05-impossible-travel",
+      "layer": "L1",
+      "description": "Same sender \u2014 Delhi tx then Dubai tx within 2 minutes.",
+      "expected_rules": [
+        "R05"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "2717fd07-193b-4e41-9ae0-e36d11975fb8",
+        "ed8d0335-1aa4-4c05-bd12-43dc59551b3a"
+      ],
+      "event_count": 2
+    },
+    {
+      "probe_name": "R06-high-risk-jurisdiction",
+      "layer": "L1",
+      "description": "International outbound to a FATF high-risk jurisdiction (AE).",
+      "expected_rules": [
+        "R06"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "fb11b8d3-b28d-441c-995d-35bf1237b2f4"
+      ],
+      "event_count": 1
+    },
+    {
+      "probe_name": "R07-device-anomaly",
+      "layer": "L1",
+      "description": "Unseen device id with amount above 200K.",
+      "expected_rules": [
+        "R07"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "c2785ca9-2a06-4b86-b68a-8099c88ac9a6"
+      ],
+      "event_count": 1
+    },
+    {
+      "probe_name": "R08-shared-device",
+      "layer": "L1",
+      "description": "Same device id used by 7 distinct senders (>5 threshold).",
+      "expected_rules": [
+        "R08"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "b756d944-42c5-4f67-9e67-0a30f00d4be1",
+        "de510714-1bfe-4c95-8a71-26392a698c0a",
+        "7121d515-841a-4c96-a8f3-353b45e82dec",
+        "a4b16a1d-9519-4d6d-8518-9e03229684b4",
+        "13188414-7a50-4155-bfcb-260516886226",
+        "6815b0b0-ee5b-4c36-9e8a-68ad902a083a",
+        "bb13a434-e312-48eb-b7d6-16326bed4a55",
+        "62c68747-3626-4f50-a7c9-6261fed91b16"
+      ],
+      "event_count": 8
+    },
+    {
+      "probe_name": "R09-excessive-beneficiaries",
+      "layer": "L1",
+      "description": "Sender pushes to 22 distinct beneficiaries in 11 hours (>20/7d).",
+      "expected_rules": [
+        "R09"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "4c584fec-965d-4101-b572-6e08290a7ca9",
+        "b570581f-4aa0-4baa-99f3-faaf059847e9",
+        "f5fd34e6-80cf-464d-beb9-f0c210cfae5a",
+        "e8e5ea90-ef54-422c-a3ca-d9027481aa48",
+        "3c6e8779-2522-4b7d-aab2-9c820f92b2a0",
+        "3d5f5838-f9cc-466c-993f-f52f21ae4eef",
+        "a140fd79-cb3c-479b-b03b-437d6b5d488b",
+        "84f8ed7e-fadd-4494-a996-dec88f51e9b6",
+        "c1563b60-c187-4625-a93b-7c9d9bf41be0",
+        "82736026-d186-493d-9949-4d50beef2bce",
+        "10455518-21be-41d4-9f93-e4102888e451",
+        "5a314fd0-a235-4d70-8e66-aa33607f18d1",
+        "b3122d92-c147-4f1d-8a7e-42c943244438",
+        "718fad5d-b0dc-4737-9cf5-b9d26f4d8053",
+        "90cb5667-ff42-4ce3-8efb-34b4ab1191a7",
+        "916900f9-3390-49d9-99c5-3a108970d13a",
+        "3cb10ac2-ba83-4bb8-a543-45d6b9fe0e9b",
+        "c156b606-6dc0-4193-81d7-dcb9174c3c32",
+        "a7ad4f46-a2b5-45f1-b72c-38a5efb909e9",
+        "bdab56e1-9364-4749-a828-205e0134f08e",
+        "c89f1ff1-8471-4db9-9731-fc000e902466",
+        "093c9815-b532-4b8f-a8e6-68547d5e907a"
+      ],
+      "event_count": 22
+    },
+    {
+      "probe_name": "R10-cycle-closure",
+      "layer": "L1",
+      "description": "A directed 3-cycle: A->B->C->A.",
+      "expected_rules": [
+        "R10"
+      ],
+      "expected_graph_features": [
+        "edge_creates_cycle"
+      ],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "fe2b7fec-475d-41e9-adff-a4cd066d9a5c",
+        "2b6d0614-eb29-42d7-99fd-c9375735d3b4",
+        "c763473d-e6a3-45a3-af4b-4e6519a1d800"
+      ],
+      "event_count": 3
+    },
+    {
+      "probe_name": "R11-round-amount",
+      "layer": "L1",
+      "description": "7 round 1L txns within 1h (>5/24h velocity).",
+      "expected_rules": [
+        "R11"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "b1cd5116-d205-48c6-82f3-15387e98e4a3",
+        "db196c12-524a-49ad-80b8-09929d28f6a4",
+        "7b1a41b0-b04e-4898-a8ba-fe4f29c0b1d5",
+        "5ed4a076-dd6a-4aac-be02-1d0638c00477",
+        "d050daa2-4e87-47be-8739-abd904ff2cfc",
+        "6bda95af-dbc1-4c07-852b-0455945ad658",
+        "d6309e39-58a6-4a00-be2c-de484fe823e2"
+      ],
+      "event_count": 7
+    },
+    {
+      "probe_name": "R12-kyc-mismatch",
+      "layer": "L1",
+      "description": "Sender with kyc_level=0 moving INR 7 lakh (>5L threshold).",
+      "expected_rules": [
+        "R12"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "a9938e81-b6f7-46b7-9c83-911837c52e32"
+      ],
+      "event_count": 1
+    },
+    {
+      "probe_name": "R13-benford",
+      "layer": "L1",
+      "description": "Sender's amount-leading-digits dominated by 9 \u2014 Benford violation.",
+      "expected_rules": [
+        "R13"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "9d5a307a-8ac4-4f13-ab88-bb70b0b3a760",
+        "7e39c62e-1cfe-4413-8f36-884c0a73bf2a",
+        "bc92fc0d-0485-4874-b16a-55e7678bcbf4",
+        "76a92c88-e06d-4974-a126-93b0ec9f2580",
+        "14560760-46e2-43c8-825a-a0dbf628c77f",
+        "0f31cd12-298d-4fda-a62d-1eb1988d2ab0",
+        "a67b89bd-f113-4e47-8983-8e91bebb8e55",
+        "e887162e-3c38-464f-904b-2021aeca3d80",
+        "b514db32-73d1-4a69-967a-4182b53b47b6"
+      ],
+      "event_count": 9
+    },
+    {
+      "probe_name": "R14-fan-in",
+      "layer": "L1",
+      "description": "6 distinct senders depositing ~uniform amounts into one aggregator.",
+      "expected_rules": [
+        "R14"
+      ],
+      "expected_graph_features": [
+        "receiver_in_degree_unique_24h"
+      ],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "4f54c6f1-a0b5-46d4-aa31-fdee1d694c45",
+        "2df9c8d5-8c6d-4380-923d-946cf7d43c34",
+        "297b5f7a-cd80-452e-a777-9b90b2ce6410",
+        "820c22bf-7ecf-4112-b554-096a206d05bf",
+        "8cc027aa-b8dc-4ecf-8175-56539e923b61",
+        "5398521c-8e88-465e-b80f-200339c581e0"
+      ],
+      "event_count": 6
+    },
+    {
+      "probe_name": "R15-layering-relay",
+      "layer": "L1",
+      "description": "A->B INR 500k inflow; B->C forwards 94% within 30 minutes (relay).",
+      "expected_rules": [
+        "R15"
+      ],
+      "expected_graph_features": [
+        "sender_is_relay_node"
+      ],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "6f00512a-3195-466b-bd2a-d3c84513060d",
+        "ce55e72d-e9e7-4741-a9e2-5482c039a4ac"
+      ],
+      "event_count": 2
+    },
+    {
+      "probe_name": "L2-cycle-closure",
+      "layer": "L2",
+      "description": "Closing edge of a directed 3-cycle.",
+      "expected_rules": [
+        "R10"
+      ],
+      "expected_graph_features": [
+        "edge_creates_cycle",
+        "cycle_length"
+      ],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "c503bb16-b0b7-4cbe-b709-bad63d68cb09",
+        "f2610f67-de9d-4a54-9e43-34d1652a85b2",
+        "9d583511-506a-4b46-8d6f-5158b868b309"
+      ],
+      "event_count": 3
+    },
+    {
+      "probe_name": "L2-fan-in-aggregation",
+      "layer": "L2",
+      "description": "7 senders converge on a single receiver.",
+      "expected_rules": [
+        "R14"
+      ],
+      "expected_graph_features": [
+        "receiver_in_degree_unique_24h"
+      ],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "32057cc6-4b75-4389-ad30-fee179dfe041",
+        "c1d8df3a-5325-4859-8e4c-853074d9f96e",
+        "11a392ea-6943-448e-8289-9c4740cea511",
+        "81147315-64a6-4720-b7e9-a562c9790b05",
+        "e8dc7408-35d4-445b-b8b7-c1b9dac090d9",
+        "f55d229c-9e44-4483-a2cf-7ff7c27538ba",
+        "05ad1f7c-0c61-4817-8e51-506a2158ec0e"
+      ],
+      "event_count": 7
+    },
+    {
+      "probe_name": "L2-fan-out",
+      "layer": "L2",
+      "description": "One sender pushes to 22 distinct receivers (>20 R09 threshold).",
+      "expected_rules": [
+        "R09"
+      ],
+      "expected_graph_features": [
+        "sender_out_degree_unique"
+      ],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "2d527d21-5618-41ba-934b-2315a13a47e2",
+        "422baec5-fdac-4d2b-9726-1738b94d0324",
+        "fe4406aa-34c2-4504-9314-5f6a8a842e33",
+        "9945e2cf-c691-4559-9b4b-c082f16b8e95",
+        "7e688ec3-2973-4c9f-a0bf-ec3cf6596d28",
+        "ed124325-f9bd-472e-b9ce-c37003581339",
+        "ac24ba1b-99ca-4a2a-ac4f-c5df341718d1",
+        "cd432487-aa36-4f7f-8a0e-c997d3e8e72b",
+        "0cf88b3d-9826-40de-b598-f8c86d36ea56",
+        "3f7b823a-2ca3-4a08-827b-407e0728a317",
+        "9b6b1782-2ad4-4c2d-ae15-f5d99c4a395c",
+        "c62510c1-3e8b-4692-8015-75d75f64522b",
+        "5a606178-3fbd-4e4f-a579-8976c77c494d",
+        "500b90d5-716f-43e2-a9b4-02c3be4cc6ab",
+        "13b6be82-d535-454c-afaa-327f2b67236c",
+        "2ea7d001-a9c8-47c2-a679-54db348aa654",
+        "e4c1a350-c763-482e-abc0-ea6a83854c59",
+        "9cc14366-6307-4a8a-8f55-9ab84ccc4a6e",
+        "3cd10b78-35b8-48bd-bbe7-28d418d41d07",
+        "8eff3a7e-f43b-4317-a57d-e1a46f426bcd",
+        "1b02652d-9062-4f3b-af87-73d7a0114ccd",
+        "9dbc15e5-073c-45cf-9fd4-cb15da0694a7"
+      ],
+      "event_count": 22
+    },
+    {
+      "probe_name": "L2-relay-node",
+      "layer": "L2",
+      "description": "B receives 500k from A then forwards 470k to C within 30 min.",
+      "expected_rules": [
+        "R15"
+      ],
+      "expected_graph_features": [
+        "sender_is_relay_node",
+        "sender_last_inflow_amount"
+      ],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "b9f01995-3d92-4d41-b971-df59149bb93e",
+        "98420cb4-b1f9-4f2b-926a-d824c74bed05"
+      ],
+      "event_count": 2
+    },
+    {
+      "probe_name": "scenario-structuring",
+      "layer": "scenario",
+      "description": "Full structuring scenario, 8 events.",
+      "expected_rules": [
+        "R02"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "05369581-3d6d-471d-ab99-7f7e4b701919",
+        "340cbabd-1a2f-41d9-a2a1-bbd5b51c7a0b",
+        "fe8d6287-e899-490a-ab50-81675ee2756c",
+        "65c421d5-7a0e-44ad-8e54-17562bf50f38",
+        "5a781ff9-548c-4d5b-ae15-d4c5d9c2f39e",
+        "9fbe0bd8-d6d3-468b-adf9-0863353a797b",
+        "7bfca25f-2f96-4675-b2dd-12dfd820d384",
+        "cfa03e4c-92cf-4881-aad8-2dec873e3b19"
+      ],
+      "event_count": 8
+    },
+    {
+      "probe_name": "scenario-circular_laundering",
+      "layer": "scenario",
+      "description": "Full circular_laundering scenario, 4 events.",
+      "expected_rules": [
+        "R10"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "97cc89aa-48dd-40f1-950c-a80c5e8527d1",
+        "a05512a6-4229-46c2-83f2-f6f7b293b518",
+        "5a97cb79-7328-4c12-afbc-b13c2c22fc74",
+        "95b0ed06-d256-4173-99c3-4bbc446ee0a5"
+      ],
+      "event_count": 4
+    },
+    {
+      "probe_name": "scenario-layering_chain",
+      "layer": "scenario",
+      "description": "Full layering_chain scenario, 5 events.",
+      "expected_rules": [
+        "R15"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "8c48073a-ef1c-4065-a252-cfdd8f9c003a",
+        "29aef2ed-d93b-43f0-9736-57ded6cc5449",
+        "0aeecdbb-0e17-4d1d-8ed3-6e131117aec9",
+        "9bc769da-e86b-401a-8810-2e9f12b73af9",
+        "f4f0e051-1463-4f51-aa17-7c719bfbcf00"
+      ],
+      "event_count": 5
+    },
+    {
+      "probe_name": "scenario-fan_in",
+      "layer": "scenario",
+      "description": "Full fan_in scenario, 8 events.",
+      "expected_rules": [
+        "R14"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "61373f26-3190-4007-9a10-a0a0fc37224f",
+        "b4345774-0b69-40a9-ae45-6d665efe970d",
+        "cfaa407d-a52a-4b46-a763-a66ced587b79",
+        "60e5966e-4340-49d4-84be-6329afd64b32",
+        "204c78ba-34ea-46e3-9216-ae8dfbfd1517",
+        "3b8f0d82-2038-435f-8ba8-63b27276eec3",
+        "8f31dc43-bd72-4052-9c9f-80de71df9151",
+        "7d1c848e-04a0-4221-864b-efbf0b1f6f68"
+      ],
+      "event_count": 8
+    },
+    {
+      "probe_name": "scenario-fan_out",
+      "layer": "scenario",
+      "description": "Full fan_out scenario, 8 events.",
+      "expected_rules": [
+        "R09"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "8cc5e52a-4ebc-4cd9-bc74-2690113a70c3",
+        "1ced0f04-3da9-4bad-95c2-44972ba6b5bb",
+        "d96d107f-ccf8-4443-bc4f-b12263806471",
+        "2493ba2f-ca88-4540-aa42-0ef858b8f674",
+        "16dea259-d25c-4f3a-8134-4b0a94016351",
+        "270bda05-766d-44f2-a839-5b3d78020332",
+        "bef7531c-c2dd-46d7-8389-9f5ad3381c19",
+        "a3a77a77-0990-4e5f-b064-d44e8accfc8e"
+      ],
+      "event_count": 8
+    },
+    {
+      "probe_name": "scenario-fraud_ring",
+      "layer": "scenario",
+      "description": "Full fraud_ring scenario, 21 events.",
+      "expected_rules": [
+        "R08",
+        "R10"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "0ad19cbb-1df5-4da1-b1b1-883caa00ba95",
+        "3af4b349-f073-4bbc-8ad6-baa07ccc5530",
+        "022e21a0-e653-4fec-bd80-5ab14587efa2",
+        "b254406a-6b12-4485-ac0e-e2261d357be3",
+        "d4193ec9-56ed-4755-a5f0-26d19c7d0e7d",
+        "120ed0c3-fb44-40c7-a0c3-82dd0345b5a2",
+        "f279c008-0832-46e2-80ef-dc234038291e",
+        "9e926df6-00be-46f5-b8eb-6388a48776b2",
+        "ef3e9655-d09e-4c93-b198-dcc6519552e8",
+        "d0dd46b0-55e6-4a29-985b-1995fae5365f",
+        "99e609b1-5cb8-4b2e-8cb3-f60a7a245c26",
+        "57c8fad5-71a5-4a94-b843-5364a02259f4",
+        "7a615913-d799-485e-8db8-4870171a8a83",
+        "06be360a-7077-4f4b-ab85-674700f082c3",
+        "556d827e-027a-4a0f-b45c-42dc90065745",
+        "d0fe3003-5df0-4d99-a073-96696fb44b15",
+        "543bf6d1-2ea0-4508-98fb-60bfd83710f8",
+        "d89f6d47-1e28-4246-954c-ede25f34f2fa",
+        "4f592432-bef8-4e0e-b3be-66d6fa34aa10",
+        "b07751bd-2acc-461e-b0e2-3dff79d9bbf0",
+        "0e72d95b-96af-49d4-9df9-c12e4e436dfc"
+      ],
+      "event_count": 21
+    },
+    {
+      "probe_name": "scenario-dormant_activation",
+      "layer": "scenario",
+      "description": "Full dormant_activation scenario, 13 events.",
+      "expected_rules": [
+        "R03"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": null,
+      "transaction_ids": [
+        "2ba9104e-1842-4e2c-bfd3-e5767d2d0319",
+        "d10c5686-4e4a-4ea6-ac4a-f8deeb662560",
+        "9a91e9ae-17e4-4b46-a485-962d44dd51a0",
+        "1602685c-648d-4c50-928a-a425a8e3ae56",
+        "a6361c18-0e45-4a35-b1d7-77b5c3b2ccd4",
+        "a982b367-fa21-402a-bcb9-b17adb8cf636",
+        "4ebb6d43-babf-4daf-aba6-53fab84951da",
+        "eba0a827-a358-4f54-96f0-5bc51adfdc36",
+        "1e7e7ab3-af3e-455e-80a2-ce7c8f00e6b3",
+        "6a6d8dc8-8833-4ecb-87f6-0462d6ee1a45",
+        "60781fcc-5d14-433d-9d6e-41f287c16ea1",
+        "d039285b-e1ff-487d-9adb-78eb07a5973a",
+        "ee7ca717-e37d-42a1-b6ae-fb0121deb647"
+      ],
+      "event_count": 13
+    },
+    {
+      "probe_name": "scenario-velocity_burst",
+      "layer": "scenario",
+      "description": "Full velocity_burst scenario, 20 events.",
+      "expected_rules": [
+        "R03"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "2aa2b92a-413e-4073-9ff8-0ce3612f8656",
+        "2a208891-7bf0-480e-82f2-b0ed5d7d42e3",
+        "a32d1142-9e56-4d36-b710-29539690c7f1",
+        "7a891784-073f-4e19-87d2-993787972621",
+        "aed017e1-99cf-4ccd-8d70-baa7046065e4",
+        "91978c74-7e24-4c93-b6d2-dc398d3df65e",
+        "b008db25-0b24-46ab-8e98-4a6a30f7b0f0",
+        "599d4096-9c0b-4441-b3a8-d12f1e9f8432",
+        "5ec42e84-ea5e-470d-9092-3bc234f73510",
+        "d3293597-a031-4b2e-955a-5653c4bdcdef",
+        "265be89d-c96c-4785-8411-499424f44a0b",
+        "70c34bcf-b425-4ec2-8c90-81bc14b47c62",
+        "d6adb950-9d2e-4d83-be2e-c234027f1712",
+        "f1d8a220-a382-45db-b7e8-1bdebb653658",
+        "5eb28b74-7d96-4467-ab92-ed6dd49c8c4d",
+        "b4946953-69e1-4698-b512-53098da74c5b",
+        "36426b3a-6739-4935-b12f-ae64d7d2a8a6",
+        "7f7bec6b-0d30-4287-b2cb-bf9e56cbfb15",
+        "3766b502-fabc-4e16-84b0-7ec5d3df2b07",
+        "d7630035-342e-4152-be0a-2b2722e71d67"
+      ],
+      "event_count": 20
+    },
+    {
+      "probe_name": "scenario-cross_border_layering",
+      "layer": "scenario",
+      "description": "Full cross_border_layering scenario, 3 events.",
+      "expected_rules": [
+        "R06"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "Medium",
+      "transaction_ids": [
+        "3cc82f3d-acc2-4ba6-bb27-68dcccf816ff",
+        "25207935-1736-40db-8aa8-1d0659e5b79b",
+        "542db155-3ff9-488c-8030-512d737d73d3"
+      ],
+      "event_count": 3
+    },
+    {
+      "probe_name": "scenario-round_tripping",
+      "layer": "scenario",
+      "description": "Full round_tripping scenario, 3 events.",
+      "expected_rules": [
+        "R10"
+      ],
+      "expected_graph_features": [],
+      "expected_min_risk_level": "High",
+      "transaction_ids": [
+        "2eaa3b4e-228c-4c98-862a-e7907cd11f64",
+        "fe4317eb-080a-4521-97f0-87da38125eec",
+        "668687bb-4020-46e6-af75-8aae3b3cf241"
+      ],
+      "event_count": 3
+    }
+  ]
+}

@@ -37,7 +37,7 @@ interface State {
   connected: boolean;
 }
 
-export function useEventStream(maxBuffer: number = 60) {
+export function useEventStream(maxBuffer: number = 60, maxAlertBuffer: number = 2000) {
   const [state, setState] = useState<State>({ events: [], alerts: [], connected: false });
   const esRef = useRef<EventSource | null>(null);
 
@@ -53,14 +53,18 @@ export function useEventStream(maxBuffer: number = 60) {
           ...s,
           connected: true,
           events: [ev, ...s.events].slice(0, maxBuffer),
-          alerts: ev.alerted ? [ev, ...s.alerts].slice(0, maxBuffer) : s.alerts,
+          // Keep a much larger alerts ring so the Overview can show the
+          // whole investigation backlog, not just the last few seconds of
+          // SSE traffic. Cap is still bounded so memory doesn't grow
+          // without limit across a long-running session.
+          alerts: ev.alerted ? [ev, ...s.alerts].slice(0, maxAlertBuffer) : s.alerts,
         }));
       } catch (e) {
         // ignore malformed lines
       }
     });
     return () => { es.close(); };
-  }, [maxBuffer]);
+  }, [maxBuffer, maxAlertBuffer]);
 
   return state;
 }

@@ -35,6 +35,27 @@ export const api = {
   generatorStart: (cfg?: { min_amount?: number; max_amount?: number; interval_seconds?: number }) =>
     _post<any>("/generator/start", cfg),
   generatorStop: () => _post<any>("/generator/stop"),
+  generatorSampleProbeCsvUrl: () => `${BASE}/generator/sample_probe_csv`,
+  generatorInjectCsv: async (file: File, autoStart: boolean = true) => {
+    const form = new FormData();
+    form.append("file", file);
+    const url = `${BASE}/generator/inject_csv?auto_start=${autoStart}`;
+    const r = await fetch(url, { method: "POST", body: form });
+    if (!r.ok) {
+      let detail = `${r.status}`;
+      try { detail = JSON.stringify(await r.json()); } catch { /* ignore */ }
+      throw new Error(`inject_csv failed: ${detail}`);
+    }
+    return r.json() as Promise<{
+      filename: string;
+      queued_events: number;
+      rows_with_errors: number;
+      errors: string[];
+      queue_depth: number;
+      generator_running: boolean;
+      generator_auto_started: boolean;
+    }>;
+  },
 
   // alerts
   alerts: (params?: { risk_level?: string; alert_status?: string; limit?: number }) => {
