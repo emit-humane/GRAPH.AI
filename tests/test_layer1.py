@@ -471,13 +471,59 @@ def test_explanations_present_for_each_triggered_rule(engine):
         assert isinstance(ex, str) and len(ex) > 0
 
 
-def test_rule_score_proportional_to_raw(engine):
-    """Firing one rule of weight 1.0 should give roughly 100*(1.0/12.2)≈8.2."""
+def test_rule_score_v2_per_fire_severity(engine):
+    """v2 aggregation: one weight-1.0 rule fires -> per_fire_score(1.0) = 70.
+
+    The v1 formula gave ~8 for this case which is invisible to fusion. v2's
+    per-fire base+slope (50 + 40 * (w - 0.5)) puts a single Critical-tier
+    rule fire at 70 (solidly High) so Layer 1 can actually lead the fused
+    decision instead of just decorating it.
+    """
     out = engine.evaluate(
         make_features(),
         make_graph_vec(),
         make_event(amount=2_000_000),  # only R01 (weight 1.0) fires
     )
-    expected = 100.0 * 1.0 / sum(r.weight for r in RULES)
     assert out.triggered_rules == ["R01"]
-    assert abs(out.rule_score - expected) < 1e-6
+    # _per_fire_score(1.0) = 50 + 40 * 0.5 = 70
+    assert out.rule_score == pytest.approx(70.0, abs=1e-6)
+
+
+def test_rule_score_single_low_weight_fire_lands_in_medium(engine):
+    """A single weight-0.7 rule fire should land mid-Medium (~58), not
+    invisible (the v1 8.2 territory).
+    """
+    out = engine.evaluate(
+        make_features(high_risk_country_flag=True),
+        make_graph_vec(),
+        make_event(amount=300_000, sender_country="IN", receiver_country="AE",
+                   is_international=True),  # only R06 (weight 0.7) fires
+    )
+    assert out.triggered_rules == ["R06"]
+    # _per_fire_score(0.7) = 50 + 40 * 0.2 = 58
+    assert out.rule_score == pytest.approx(58.0, abs=1e-6)
+
+
+def test_rule_score_co_firing_bonus_pushes_toward_critical(engine):
+    """Co-firing bonus: top per-fire score + 10 per additional rule, capped at +30.
+
+    R01 (1.0) + R10 (1.0) together: top=70, +10 for one extra fire -> 80.
+    """
+    out = engine.evaluate(
+        make_features(),
+        make_graph_vec(edge_creates_cycle=True, cycle_length=2),
+        make_event(amount=2_000_000),   # R01 + R10 both fire
+    )
+    assert set(out.triggered_rules) >= {"R01", "R10"}
+    # top = 70, co_bonus = +10 per additional rule, capped at 30.
+    n_fired = len(out.triggered_rules)
+    expected = min(100.0, 70.0 + min(30.0, 10.0 * (n_fired - 1)))
+    assert out.rule_score == pytest.approx(expected, abs=1e-6)
+    # 2-rule co-fire MUST clear the High threshold (>60)
+    assert out.rule_score >= 60.0
+
+
+def test_rule_score_zero_when_nothing_fires(engine):
+    out = engine.evaluate(make_features(), make_graph_vec(), make_event())
+    assert out.triggered_rules == []
+    assert out.rule_score == 0.0

@@ -77,6 +77,39 @@ def _normalise_to_100(deviation: float, gain: float = 1.5) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Anomaly score recalibration
+# --------------------------------------------------------------------------- #
+# Empirical pivot: in the v1 inferencer the ensemble score saturated in the
+# 60-70 band for almost every transaction because three sub-models each
+# clustered around 50 (their natural neutral point). That made the layer
+# non-discriminating — a true positive scored 64 and a false positive scored
+# 62. We rescale the raw ensemble through a sharp sigmoid centred at
+# ``ANOMALY_PIVOT`` so the discriminating range spreads across [0, 100]:
+#
+#   raw 50 (deeply normal)    →  ~14  (clearly normal)
+#   raw 60 (slightly elevated)→  ~30
+#   raw 65 (ambiguous)        →  ~50  (genuine "unsure")
+#   raw 70 (anomalous)        →  ~70
+#   raw 80 (strongly anomalous)→ ~92
+#
+# Pivot + slope are tunable here without retraining the underlying models.
+ANOMALY_PIVOT: float = 65.0       # raw ensemble value that maps to 50
+ANOMALY_SLOPE: float = 0.20       # 1/(range of half the dynamic band)
+
+
+def _recalibrate_anomaly(raw_ensemble: float) -> float:
+    """Spread the saturated raw ensemble (typically 50-80) across [0, 100].
+
+    Uses a sigmoid centred at ``ANOMALY_PIVOT``. Production wins from this:
+    normal traffic gets pushed BELOW the alert threshold instead of
+    clustering near 60, and genuinely anomalous events get amplified above
+    70 instead of being a few points above the noise floor.
+    """
+    delta = (raw_ensemble - ANOMALY_PIVOT) * ANOMALY_SLOPE
+    return float(np.clip(_sigmoid(delta, gain=1.0) * 100.0, 0.0, 100.0))
+
+
+# --------------------------------------------------------------------------- #
 # Inferencer
 # --------------------------------------------------------------------------- #
 
@@ -191,7 +224,12 @@ class BehavioralAnomalyInferencer:
         lof_score = float(np.clip(50.0 - lof_decision * 200.0, 0.0, 100.0))
         ae_score = float(np.clip((ae_mse - baseline_ae) * 200.0, 0.0, 100.0))
 
-        anomaly_score = float(np.clip((iso_score + lof_score + ae_score) / 3.0, 0.0, 100.0))
+        # Raw mean — the three sub-scores all hover near 50 for typical
+        # traffic, so the unrecalibrated mean clusters in the 55-70 band
+        # regardless of how anomalous the event actually is. We RECALIBRATE
+        # below to spread the genuine signal across [0, 100].
+        raw_ensemble = float(np.clip((iso_score + lof_score + ae_score) / 3.0, 0.0, 100.0))
+        anomaly_score = _recalibrate_anomaly(raw_ensemble)
 
         # 7) Top-3 drivers — features with the largest per-feature recon loss.
         loss_per_feature = per_feature_loss[0]

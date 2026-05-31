@@ -290,3 +290,34 @@ def test_module_does_not_import_node2vec_or_torch_geometric():
     for name in newly:
         top = name.split(".")[0]
         assert top not in banned, f"L4 inference unexpectedly loaded {name}"
+
+
+# --------------------------------------------------------------------------- #
+# Recalibration — pure-function test, no model needed
+# --------------------------------------------------------------------------- #
+
+
+def test_anomaly_recalibration_spreads_saturated_range():
+    """The v1 ensemble saturated raw scores in ~50-70. Recalibration must
+    spread that into a usable [0, 100] range.
+    """
+    from src.system2_detection.layer4_anomaly.d6b_inference import (
+        _recalibrate_anomaly,
+        ANOMALY_PIVOT,
+    )
+
+    deeply_normal = _recalibrate_anomaly(40.0)
+    slightly_high = _recalibrate_anomaly(60.0)
+    at_pivot      = _recalibrate_anomaly(ANOMALY_PIVOT)
+    anomalous     = _recalibrate_anomaly(75.0)
+    very_anomalous = _recalibrate_anomaly(90.0)
+
+    # Pivot maps to exactly 50
+    assert at_pivot == pytest.approx(50.0, abs=1e-6)
+    # Normal-side compresses BELOW 30 so it stays under the alert threshold
+    assert deeply_normal < 30, f"raw=40 -> {deeply_normal} should be < 30"
+    # Genuine anomalies push ABOVE 60
+    assert anomalous > 60, f"raw=75 -> {anomalous} should be > 60"
+    assert very_anomalous > 85, f"raw=90 -> {very_anomalous} should be > 85"
+    # Strictly monotone in the raw signal
+    assert deeply_normal < slightly_high < at_pivot < anomalous < very_anomalous

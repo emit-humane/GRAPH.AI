@@ -23,6 +23,26 @@ def test_default_fusion_weights_sum_to_one():
     assert abs(sum(FUSION_WEIGHTS.values()) - 1.0) < 1e-9
 
 
+def test_v2_weight_ordering_rule_and_graph_dominant():
+    """v2 contract: rule + graph carry > 50% of total weight, supervised < 25%.
+
+    Locks in the design rationale documented in d8_fusion's module docstring.
+    Regulators / auditors expect deterministic + structural layers to dominate
+    over the black-box ML.
+    """
+    rule_plus_graph = FUSION_WEIGHTS["rule_score"] + FUSION_WEIGHTS["graph_score"]
+    assert rule_plus_graph > 0.50, (
+        f"rule+graph weight {rule_plus_graph:.2f} must dominate fusion (>0.50)"
+    )
+    assert FUSION_WEIGHTS["supervised_score"] < 0.25, (
+        "supervised weight must be < 0.25 to limit black-box dependence"
+    )
+    # Rule is the single largest signal
+    assert FUSION_WEIGHTS["rule_score"] == max(FUSION_WEIGHTS.values()), (
+        "Layer-1 rules must be the heaviest single signal"
+    )
+
+
 def test_engine_asserts_weight_sum():
     with pytest.raises(AssertionError):
         RiskFusionEngine(weights={
@@ -89,13 +109,14 @@ def test_all_one_hundred_scores_yield_critical():
 
 
 def test_weighted_sum_matches_spec_formula():
-    """Hand-computed sanity check using the spec's exact weights."""
+    """Hand-computed sanity check using the v2 (rule + graph dominant) weights."""
     eng = RiskFusionEngine()
     s = _make_scores(
         rule_score=10, graph_score=20, supervised_score=80,
         anomaly_score=40, tgn_score=50,
     )
-    expected = 0.20 * 10 + 0.15 * 20 + 0.35 * 80 + 0.20 * 40 + 0.10 * 50
+    # v2 weights: rule 0.30, graph 0.25, supervised 0.20, anomaly 0.15, tgn 0.10
+    expected = 0.30 * 10 + 0.25 * 20 + 0.20 * 80 + 0.15 * 40 + 0.10 * 50
     out = eng.fuse(s)
     assert out.transaction_risk_score == pytest.approx(expected, abs=1e-9)
 
@@ -108,8 +129,8 @@ def test_score_breakdown_contains_all_layers_and_weights():
     assert set(bd["weights"].keys()) == set(FUSION_WEIGHTS.keys())
     assert set(bd["weighted_contributions"].keys()) == set(FUSION_WEIGHTS.keys())
     assert bd["fusion_mode"] == "static_weights"
-    # Weighted contribution is score × weight
-    assert bd["weighted_contributions"]["supervised_score"] == pytest.approx(70.0 * 0.35, abs=1e-6)
+    # Weighted contribution is score × weight (v2 supervised weight = 0.20)
+    assert bd["weighted_contributions"]["supervised_score"] == pytest.approx(70.0 * 0.20, abs=1e-6)
 
 
 # --------------------------------------------------------------------------- #
@@ -120,13 +141,13 @@ def test_score_breakdown_contains_all_layers_and_weights():
 def test_group_risk_score_includes_density_and_cycle_bumps():
     eng = RiskFusionEngine()
     s = _make_scores(
-        supervised_score=40,  # tx_score → 0.35*40 = 14
+        supervised_score=40,  # tx_score → 0.20*40 = 8 (v2 supervised weight = 0.20)
         community_density=1.0,
         has_cycle=True,
         sender_community_risk_score=50,
     )
     out = eng.fuse(s)
-    # group = max(tx_score=14, 50) + 0.15*100 + 0.10*100 = 50 + 15 + 10 = 75
+    # group = max(tx_score=8, 50) + 0.15*100 + 0.10*100 = 50 + 15 + 10 = 75
     assert out.group_risk_score == pytest.approx(75.0, abs=1e-6)
     assert out.risk_level_group == "High"
 
@@ -136,7 +157,7 @@ def test_group_risk_clipped_to_100():
     s = _make_scores(supervised_score=100, community_density=1.0, has_cycle=True,
                      sender_community_risk_score=90)
     out = eng.fuse(s)
-    # tx_score = 35; max(35, 90) = 90; + 15 + 10 = 115 → clipped to 100
+    # tx_score = 0.20*100 = 20; max(20, 90) = 90; + 15 + 10 = 115 → clipped to 100
     assert out.group_risk_score == 100.0
 
 
@@ -291,7 +312,8 @@ def test_collect_layer_scores_round_trip_through_engine():
 
     eng = RiskFusionEngine()
     out = eng.fuse(s)
-    expected = 0.20 * 40 + 0.15 * 55 + 0.35 * 60 + 0.20 * 25 + 0.10 * 35
+    # v2 weights: rule 0.30, graph 0.25, supervised 0.20, anomaly 0.15, tgn 0.10
+    expected = 0.30 * 40 + 0.25 * 55 + 0.20 * 60 + 0.15 * 25 + 0.10 * 35
     assert out.transaction_risk_score == pytest.approx(expected, abs=1e-6)
 
 

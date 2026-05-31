@@ -3,20 +3,28 @@
 Combines the five layer outputs into a single ``FusedRiskOutput``:
 
     transaction_risk_score =
-        0.20 * rule_score         +   # Layer 1 — deterministic governance
-        0.15 * graph_score        +   # Layer 2 — structural AML intelligence
-        0.35 * supervised_score   +   # Layer 3 — PRIMARY calibrated detector
-        0.20 * anomaly_score      +   # Layer 4 — unseen behavior deviation
-        0.10 * tgn_score              # Layer 5 — advanced specialist intelligence
+        0.30 * rule_score         +   # Layer 1 — deterministic AML governance
+        0.25 * graph_score        +   # Layer 2 — structural AML intelligence
+        0.20 * supervised_score   +   # Layer 3 — calibrated ML detector
+        0.15 * anomaly_score      +   # Layer 4 — unseen behaviour deviation
+        0.10 * tgn_score              # Layer 5 — advanced temporal specialist
 
-Why these weights:
-    * Supervised ML (0.35) is the highest-precision, calibrated detector. It
-      directly models the labels we have. It gets the largest single slice.
-    * Rules (0.20) and Anomaly (0.20) tie for second: rules give us
-      deterministic, auditable governance (regulators love this); anomaly
-      gives us coverage on patterns the supervised model has never seen.
-    * Graph (0.15) provides structural / topological AML signal that's
-      complementary to the per-event features.
+Why these weights (v2 — rule + graph dominant):
+    * Rules (0.30) are auditable, interpretable, and per-rule precision on
+      the verification suite is high (R02 / R12 / R14 / R15 all hit 1.00).
+      They are also the layer regulators understand. Heaviest weight.
+    * Graph (0.25) is the second strongest. Mean graph score on confirmed
+      true positives was 69/100 in the last full run — it's a complementary,
+      non-ML signal that catches structural laundering (rings, layering,
+      fan-in/out) where rules alone can't.
+    * Supervised ML (0.20) is calibrated and powerful but black-box. It
+      gets less weight than rules+graph so the fusion is defensible to
+      auditors and harder to skew with adversarial behaviour patterns the
+      training data didn't see.
+    * Anomaly (0.15) is now paired with an inference-time recalibration in
+      ``d6b_inference.py`` that spreads the saturated 60-70 raw range across
+      [0, 100]. Even with the fix, anomaly is a discovery signal more than
+      a precision signal, so it gets the smaller weight.
     * TGN (0.10) is advanced specialist intelligence — modest weight until
       independent validation accumulates.
     All five weights sum to 1.0 and that invariant is asserted at construction.
@@ -61,27 +69,27 @@ logger = logging.getLogger(__name__)
 
 
 FUSION_WEIGHTS: dict[str, float] = {
-    "rule_score": 0.20,
-    "graph_score": 0.15,
-    "supervised_score": 0.35,
-    "anomaly_score": 0.20,
-    "tgn_score": 0.10,
+    "rule_score":       0.30,   # PRIMARY — auditable, FATF-aligned rules
+    "graph_score":      0.25,   # strong structural signal
+    "supervised_score": 0.20,   # calibrated ML, less weight to limit black-box dependence
+    "anomaly_score":    0.15,   # discovery signal (recalibrated in D6b)
+    "tgn_score":        0.10,   # temporal specialist, modest weight
 }
 
 WEIGHT_RATIONALES: dict[str, str] = {
-    "rule_score": "deterministic governance",
-    "graph_score": "structural AML intelligence",
-    "supervised_score": "PRIMARY calibrated detector",
-    "anomaly_score": "unseen behaviour deviation",
-    "tgn_score": "advanced specialist intelligence",
+    "rule_score":       "PRIMARY auditable AML rules",
+    "graph_score":      "structural AML intelligence",
+    "supervised_score": "calibrated ML detector",
+    "anomaly_score":    "behavioural deviation (recalibrated)",
+    "tgn_score":        "temporal-graph specialist",
 }
 
 LAYER_DISPLAY_NAMES: dict[str, str] = {
-    "rule_score": "Rule engine (Layer 1)",
-    "graph_score": "Graph analytics (Layer 2)",
+    "rule_score":       "Rule engine (Layer 1, PRIMARY)",
+    "graph_score":      "Graph analytics (Layer 2)",
     "supervised_score": "Supervised ML (Layer 3)",
-    "anomaly_score": "Behavioural anomaly (Layer 4)",
-    "tgn_score": "TGN / GNN (Layer 5)",
+    "anomaly_score":    "Behavioural anomaly (Layer 4)",
+    "tgn_score":        "TGN / GNN (Layer 5)",
 }
 
 
