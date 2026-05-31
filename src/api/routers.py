@@ -771,31 +771,35 @@ def build_report_router(state: AppState) -> APIRouter:
                 return alert
         raise HTTPException(status_code=404, detail=f"transaction {tx_id} not found")
 
-    @r.get("/{tx_id}")
-    def report_json(tx_id: str) -> dict[str, Any]:
+    def _build_report(tx_id: str) -> dict[str, Any]:
+        """Single source of truth for the fraud-report payload.
+
+        The JSON endpoint, the PDF renderer, and the ZIP packager all share
+        this so the on-website report and the downloadable PDF can't drift.
+        """
         payload = _find_payload(tx_id)
-        narrative = _narrative(payload)
         indicators = _indicators(payload)
-        timeline = _timeline(payload, state)
-        peer = _peer_comparison(payload, state)
-        recommendations = _recommendations(payload, indicators)
         return {
             "case_id": f"FRAUD_{tx_id[:10]}",
             "transaction": payload,
             "filing_notes": _filing_notes(payload),
-            "narrative": narrative,
+            "narrative": _narrative(payload),
             "indicators": indicators,
-            "timeline": timeline,
-            "peer_comparison": peer,
-            "recommendations": recommendations,
+            "timeline": _timeline(payload, state),
+            "peer_comparison": _peer_comparison(payload, state),
+            "recommendations": _recommendations(payload, indicators),
             "regulatory_context": _regulatory_context(payload, indicators),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    @r.get("/{tx_id}")
+    def report_json(tx_id: str) -> dict[str, Any]:
+        return _build_report(tx_id)
+
     @r.get("/{tx_id}/pdf")
     def report_pdf(tx_id: str) -> StreamingResponse:
-        payload = _find_payload(tx_id)
-        pdf_bytes = _render_pdf(payload, _filing_notes(payload))
+        report = _build_report(tx_id)
+        pdf_bytes = _render_pdf(report)
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type="application/pdf",
@@ -804,20 +808,15 @@ def build_report_router(state: AppState) -> APIRouter:
 
     @r.get("/{tx_id}/zip")
     def report_zip(tx_id: str) -> StreamingResponse:
-        payload = _find_payload(tx_id)
-        notes = _filing_notes(payload)
+        report = _build_report(tx_id)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f"report_{tx_id}.json", json.dumps({
-                "case_id": f"FRAUD_{tx_id[:10]}",
-                "transaction": payload,
-                "filing_notes": notes,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            }, default=str, indent=2))
-            zf.writestr(f"report_{tx_id}.pdf", _render_pdf(payload, notes))
+            zf.writestr(f"report_{tx_id}.json", json.dumps(report, default=str, indent=2))
+            zf.writestr(f"report_{tx_id}.pdf", _render_pdf(report))
             zf.writestr(
                 "explanation.txt",
-                f"Case ID: FRAUD_{tx_id[:10]}\n\n{payload.get('explanation', '')}\n",
+                f"Case ID: {report['case_id']}\n\n"
+                f"{report['transaction'].get('explanation', '')}\n",
             )
         buf.seek(0)
         return StreamingResponse(
@@ -1239,114 +1238,528 @@ def _regulatory_context(payload: dict[str, Any], indicators: list[dict[str, Any]
     return cites
 
 
-def _render_pdf(payload: dict[str, Any], notes: str) -> bytes:
+def _render_pdf(report: dict[str, Any]) -> bytes:
+    """Render the full fraud-report PDF.
+
+    Mirrors the on-website report section-for-section so a downloaded PDF
+    carries the same evidence the analyst saw on screen:
+
+        1. Header band (case id, generated-at)
+        2. Risk hero        (gauge-style card + key facts)
+        3. Parties           (sender + receiver cards)
+        4. Executive summary (narrative.why_flagged + which_rules + next_steps)
+        5. Red-flag indicators table
+        6. Peer comparison   (if available)
+        7. Per-layer score breakdown bars
+        8. Counterparty activity timeline
+        9. Investigator recommendations checklist
+        10. Regulatory citations
+        11. Filing notes (FIU STR free-text)
+
+    Uses Helvetica throughout because reportlab's bundled font has full Latin
+    coverage. The Indian-rupee glyph (₹) is replaced with the safe "INR" tag
+    at render time to avoid font-fallback boxes in some Reader builds.
+    """
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import (
-        Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+        KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
     )
     from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
 
+    payload = report.get("transaction", {}) or {}
+    narrative = report.get("narrative", {}) or {}
+    indicators = report.get("indicators", []) or []
+    peer = report.get("peer_comparison", {}) or {}
+    timeline = report.get("timeline", []) or []
+    recommendations = report.get("recommendations", []) or []
+    citations = report.get("regulatory_context", []) or []
+    notes = report.get("filing_notes", "") or ""
+    case_id = report.get("case_id", "")
+
+    # ---- Palette (matches frontend) -------------------------------------- #
+    C_INK     = colors.HexColor("#0d1320")
+    C_PANEL   = colors.HexColor("#101728")
+    C_PANEL_HI= colors.HexColor("#1a2438")
+    C_BORDER  = colors.HexColor("#1f2940")
+    C_TEXT    = colors.HexColor("#e6ebf5")
+    C_DIM     = colors.HexColor("#8a96b0")
+    C_FAINT   = colors.HexColor("#5e6b85")
+    C_TEAL    = colors.HexColor("#34d399")
+    C_PINK    = colors.HexColor("#e23d6e")
+    C_AMBER   = colors.HexColor("#d99a2b")
+    C_VIOLET  = colors.HexColor("#a78bfa")
+    C_CYAN    = colors.HexColor("#22d3ee")
+
+    LEVEL_COLOR = {
+        "Low":      C_TEAL,
+        "Medium":   C_AMBER,
+        "High":     C_PINK,
+        "Critical": C_PINK,
+    }
+    SEVERITY_COLOR = {
+        "Low":      C_TEAL,
+        "Medium":   C_AMBER,
+        "High":     C_PINK,
+        "Critical": C_PINK,
+    }
+    LAYER_COLOR = {
+        "rule_score":       C_CYAN,
+        "graph_score":      C_VIOLET,
+        "supervised_score": C_TEAL,
+        "anomaly_score":    C_AMBER,
+        "tgn_score":        colors.HexColor("#f472b6"),
+    }
+    LAYER_LABEL = {
+        "rule_score":       "Rule engine (L1)",
+        "graph_score":      "Graph analytics (L2)",
+        "supervised_score": "Supervised ML (L3)",
+        "anomaly_score":    "Behavioural anomaly (L4)",
+        "tgn_score":        "TGN / GNN (L5)",
+    }
+
+    # ---- Helpers --------------------------------------------------------- #
+    def _safe(s: Any) -> str:
+        """Strip glyphs reportlab's Helvetica can't render; keep meaning."""
+        text = "" if s is None else str(s)
+        return text.replace("₹", "INR ").replace("–", "-").replace("—", "-").replace("•", "*")
+
+    def _human_amount(amt: Any) -> str:
+        try:
+            a = float(amt)
+        except (TypeError, ValueError):
+            return "-"
+        if a >= 1e7:
+            return f"INR {a / 1e7:,.2f} Cr"
+        if a >= 1e5:
+            return f"INR {a / 1e5:,.2f} L"
+        return f"INR {a:,.0f}"
+
+    # ---- Styles ---------------------------------------------------------- #
+    styles = getSampleStyleSheet()
+    title_st  = ParagraphStyle("title", parent=styles["Title"], textColor=C_INK,
+                               fontName="Helvetica-Bold", fontSize=18, leading=22, spaceAfter=2)
+    label_st  = ParagraphStyle("label", parent=styles["Normal"], textColor=C_DIM,
+                               fontName="Helvetica-Bold", fontSize=7,
+                               spaceAfter=2)
+    section_st = ParagraphStyle("section", parent=styles["Heading2"], textColor=C_INK,
+                                fontName="Helvetica-Bold", fontSize=12, leading=14,
+                                spaceBefore=8, spaceAfter=4)
+    body_st   = ParagraphStyle("body", parent=styles["Normal"], textColor=C_INK,
+                               fontName="Helvetica", fontSize=9, leading=12, alignment=TA_LEFT)
+    body_dim  = ParagraphStyle("dim",  parent=body_st, textColor=C_DIM)
+    body_mono = ParagraphStyle("mono", parent=body_st, fontName="Courier", fontSize=8)
+    rec_title = ParagraphStyle("rec_title", parent=body_st, fontName="Helvetica-Bold", fontSize=9)
+
+    # ---- Document --------------------------------------------------------- #
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
-        leftMargin=18 * mm, rightMargin=18 * mm,
-        topMargin=18 * mm, bottomMargin=18 * mm,
-        title=f"GRAPH.AI Report {payload.get('transaction_id', '')}",
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=15 * mm, bottomMargin=15 * mm,
+        title=f"GRAPH.AI Fraud Report {case_id}",
+        author="GRAPH.AI", subject="FIU Filing Preview",
     )
-    styles = getSampleStyleSheet()
-    body = []
-    body.append(Paragraph("<b>GRAPH.AI — FIU Filing Preview</b>", styles["Title"]))
-    body.append(Spacer(1, 4 * mm))
-    body.append(Paragraph(
-        f"<b>Case ID</b>: FRAUD_{payload.get('transaction_id', '')[:10]}",
-        styles["Normal"],
-    ))
-    body.append(Paragraph(
-        f"<b>Transaction</b>: {payload.get('transaction_id', '')}", styles["Normal"]
-    ))
-    body.append(Paragraph(
-        f"<b>Generated</b>: {datetime.now(timezone.utc).isoformat()}", styles["Normal"]
-    ))
-    body.append(Spacer(1, 4 * mm))
+    body: list = []
 
-    breakdown = payload.get("score_breakdown") or {}
-    scores = breakdown.get("scores", {})
-    weights = breakdown.get("weights", {})
-    rows = [["Layer", "Score (0-100)", "Weight"]]
-    for k in ("rule_score", "graph_score", "supervised_score", "anomaly_score", "tgn_score"):
-        rows.append([k, f"{float(scores.get(k, 0)):.2f}", f"{float(weights.get(k, 0)):.2f}"])
-    rows.append(["transaction_risk_score", f"{float(payload.get('transaction_risk_score', 0)):.2f}", "—"])
-    rows.append(["group_risk_score", f"{float(payload.get('group_risk_score', 0)):.2f}", "—"])
-    tbl = Table(rows, colWidths=[55 * mm, 40 * mm, 30 * mm])
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2940")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+    # =====================================================================
+    # 1. Header band
+    # =====================================================================
+    header_rows = [[
+        Paragraph("<font color='#34d399'><b>G.R.A.P.H. AI</b></font> &nbsp;-&nbsp; FIU Filing Preview",
+                  ParagraphStyle("hdr", parent=body_st, textColor=C_INK, fontSize=10)),
+        Paragraph(_safe(f"Generated: {report.get('generated_at', '')[:19]} UTC"),
+                  ParagraphStyle("hdr_r", parent=body_dim, alignment=2, fontSize=8)),
+    ]]
+    hdr = Table(header_rows, colWidths=[110 * mm, 70 * mm])
+    hdr.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, C_BORDER),
     ]))
-    body.append(tbl)
-    body.append(Spacer(1, 4 * mm))
-
-    body.append(Paragraph("<b>Triggered patterns</b>", styles["Heading3"]))
-    patterns = payload.get("triggered_patterns") or []
-    body.append(Paragraph(
-        ", ".join(patterns) if patterns else "—", styles["Normal"],
-    ))
+    body.append(hdr)
+    body.append(Spacer(1, 2 * mm))
+    body.append(Paragraph(_safe(case_id), title_st))
+    body.append(Paragraph(_safe(f"Transaction {payload.get('transaction_id', '')}"), body_dim))
     body.append(Spacer(1, 3 * mm))
 
-    body.append(Paragraph("<b>Top SHAP features</b>", styles["Heading3"]))
-    shap = payload.get("top_shap_features") or []
-    body.append(Paragraph(", ".join(shap) if shap else "—", styles["Normal"]))
+    # =====================================================================
+    # 2. Risk hero  (narrative.what_happened + key facts + risk score box)
+    # =====================================================================
+    risk = float(payload.get("transaction_risk_score", 0))
+    risk_level = payload.get("risk_level", "Low")
+    risk_color = LEVEL_COLOR.get(risk_level, C_TEAL)
+    group_risk = float(payload.get("group_risk_score", 0))
+    group_level = payload.get("risk_level_group", "Low")
+
+    risk_box_inner = [
+        [Paragraph("<font size='7' color='#8a96b0'>FUSED RISK</font>",
+                   ParagraphStyle("rb_lbl", parent=body_st))],
+        [Paragraph(f"<font color='{risk_color.hexval()}' size='32'><b>{risk:.0f}</b></font>",
+                   ParagraphStyle("rb_n", parent=body_st, alignment=1))],
+        [Paragraph(f"<font color='{risk_color.hexval()}' size='10'><b>{risk_level.upper()}</b></font>",
+                   ParagraphStyle("rb_lv", parent=body_st, alignment=1))],
+        [Paragraph(_safe(f"Group {group_risk:.0f} / {group_level}"),
+                   ParagraphStyle("rb_g", parent=body_dim, alignment=1, fontSize=7))],
+    ]
+    risk_box = Table(risk_box_inner, colWidths=[50 * mm])
+    risk_box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 1.2, risk_color),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f7f9fc")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    facts_lines = [
+        f"<b>Amount:</b> {_human_amount(payload.get('amount'))}",
+        f"<b>Type:</b> {_safe(payload.get('transaction_type', '-'))} &nbsp; "
+        f"<b>Channel:</b> {_safe(payload.get('payment_channel', '-'))}",
+        f"<b>When:</b> {_safe(payload.get('timestamp', '-')[:19])}",
+    ]
+    if narrative.get("what_happened"):
+        facts_lines.insert(0, _safe(narrative["what_happened"]))
+    hero_left = [Paragraph(line, body_st) for line in facts_lines]
+
+    hero = Table([[hero_left, risk_box]], colWidths=[125 * mm, 55 * mm])
+    hero.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    body.append(KeepTogether(hero))
     body.append(Spacer(1, 4 * mm))
 
-    body.append(Paragraph("<b>Explanation</b>", styles["Heading3"]))
-    explanation = payload.get("explanation", "") or "—"
-    for line in explanation.split("\n"):
-        body.append(Paragraph(line.replace("•", "&bull;"), styles["Normal"]))
+    # =====================================================================
+    # 3. Parties
+    # =====================================================================
+    body.append(Paragraph("Counterparties", section_st))
+    party_rows = [
+        [
+            _party_cell(payload, "Sender", "sender_account", "sender_bank", "sender_country",
+                        body_st, body_dim, C_BORDER),
+            Paragraph(f"<font color='{C_PINK.hexval()}' size='14'><b>&gt;&gt;&gt;</b></font><br/>"
+                      f"<font size='8' color='#8a96b0'>{_human_amount(payload.get('amount'))}</font>",
+                      ParagraphStyle("arrow", parent=body_st, alignment=1)),
+            _party_cell(payload, "Receiver", "receiver_account", "receiver_bank", "receiver_country",
+                        body_st, body_dim, C_BORDER),
+        ]
+    ]
+    parties = Table(party_rows, colWidths=[78 * mm, 24 * mm, 78 * mm])
+    parties.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    body.append(parties)
     body.append(Spacer(1, 4 * mm))
 
-    # ---- Red-flag indicators table ---------------------------------------- #
-    indicators = _indicators(payload)
+    # =====================================================================
+    # 4. Executive summary
+    # =====================================================================
+    body.append(Paragraph("Executive summary", section_st))
+    for key in ("why_flagged", "which_rules", "next_steps"):
+        text = narrative.get(key)
+        if text:
+            body.append(Paragraph(_safe(text), body_st))
+            body.append(Spacer(1, 1.5 * mm))
+
+    # =====================================================================
+    # 5. Red-flag indicators
+    # =====================================================================
     if indicators:
-        body.append(Paragraph("<b>Red-flag indicators</b>", styles["Heading3"]))
-        irows = [["Source", "Indicator", "Severity"]]
-        for ind in indicators[:14]:
-            irows.append([
-                ind.get("source", ""),
-                ind.get("title", ""),
-                ind.get("severity", ""),
+        body.append(Paragraph(f"Red-flag indicators ({len(indicators)})", section_st))
+        ind_rows = [[
+            Paragraph("<b>RULE</b>", body_st),
+            Paragraph("<b>INDICATOR / DETAIL</b>", body_st),
+            Paragraph("<b>SOURCE</b>", body_st),
+            Paragraph("<b>SEVERITY</b>", body_st),
+        ]]
+        for ind in indicators[:18]:
+            sev_c = SEVERITY_COLOR.get(ind.get("severity", "Low"), C_TEAL)
+            cell_detail = (
+                f"<b>{_safe(ind.get('title', ''))}</b><br/>"
+                f"<font color='{C_DIM.hexval()}' size='8'>{_safe(ind.get('detail', ''))}</font>"
+                + (f"<br/><font color='{C_FAINT.hexval()}' size='7'>{_safe(ind.get('regulatory', ''))}</font>"
+                   if ind.get("regulatory") else "")
+            )
+            ind_rows.append([
+                Paragraph(_safe(ind.get("rule_id", "")), body_mono),
+                Paragraph(cell_detail, body_st),
+                Paragraph(_safe(ind.get("source", "")),
+                          ParagraphStyle("src", parent=body_st, fontSize=7, textColor=C_DIM)),
+                Paragraph(f"<font color='{sev_c.hexval()}'><b>{_safe(ind.get('severity', ''))}</b></font>",
+                          ParagraphStyle("sev", parent=body_st, fontSize=8)),
             ])
-        itbl = Table(irows, colWidths=[55 * mm, 80 * mm, 25 * mm])
-        itbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2940")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ind_tbl = Table(ind_rows, colWidths=[18 * mm, 105 * mm, 35 * mm, 22 * mm], repeatRows=1)
+        ind_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), C_INK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), C_TEXT),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6fa")]),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.25, C_BORDER),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
-        body.append(itbl)
+        body.append(ind_tbl)
         body.append(Spacer(1, 4 * mm))
 
-    body.append(Paragraph("<b>Suggested Filing Notes</b>", styles["Heading3"]))
-    body.append(Paragraph(notes, styles["Normal"]))
-
-    # ---- Regulatory citations -------------------------------------------- #
-    cites = _regulatory_context(payload, indicators)
-    if cites:
-        body.append(Spacer(1, 4 * mm))
-        body.append(Paragraph("<b>Regulatory context</b>", styles["Heading3"]))
-        for c in cites:
+    # =====================================================================
+    # 6. Peer comparison
+    # =====================================================================
+    if peer.get("available"):
+        body.append(Paragraph("How this differs from the sender's normal", section_st))
+        mult = float(peer.get("multiple_of_mean", 1.0))
+        mult_color = C_PINK if peer.get("is_outlier") else C_TEAL
+        peer_row = [[
+            _stat_cell("This tx",        _human_amount(peer.get("this_amount")), C_PINK, body_st, body_dim),
+            _stat_cell("Sender mean",    _human_amount(peer.get("mean_amount")), C_INK, body_st, body_dim),
+            _stat_cell("Sender median",  _human_amount(peer.get("median_amount")), C_INK, body_st, body_dim),
+            _stat_cell("Sender max",     _human_amount(peer.get("max_amount")), C_INK, body_st, body_dim),
+            _stat_cell("x of mean",      f"{mult:.1f}x", mult_color, body_st, body_dim),
+        ]]
+        peer_tbl = Table(peer_row, colWidths=[36 * mm] * 5)
+        peer_tbl.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOX", (0, 0), (-1, -1), 0.4, C_BORDER),
+            ("LINEBEFORE", (1, 0), (-1, -1), 0.25, C_BORDER),
+        ]))
+        body.append(peer_tbl)
+        if peer.get("is_outlier"):
+            body.append(Spacer(1, 1.5 * mm))
             body.append(Paragraph(
-                f"<b>{c['code']}</b> — {c['title']}: {c['detail']}",
-                styles["Normal"],
+                f"<font color='{C_PINK.hexval()}'>! This transaction is "
+                f"<b>{mult:.1f}x</b> the sender's recent mean - material outlier.</font>",
+                body_st,
             ))
-            body.append(Spacer(1, 1 * mm))
+        body.append(Spacer(1, 4 * mm))
+
+    # =====================================================================
+    # 7. Per-layer score breakdown
+    # =====================================================================
+    body.append(Paragraph(f"Per-layer breakdown (fused {risk:.1f})", section_st))
+    breakdown = payload.get("score_breakdown") or {}
+    scores  = breakdown.get("scores", {})
+    weights = breakdown.get("weights", {})
+    contribs = breakdown.get("weighted_contributions", {})
+    bd_rows = [[
+        Paragraph("<b>LAYER</b>", body_st),
+        Paragraph("<b>SCORE</b>", body_st),
+        Paragraph("<b>BAR</b>", body_st),
+        Paragraph("<b>WEIGHT</b>", body_st),
+        Paragraph("<b>+CONTRIB</b>", body_st),
+    ]]
+    for k in ("rule_score", "graph_score", "supervised_score", "anomaly_score", "tgn_score"):
+        score = float(scores.get(k, 0))
+        weight = float(weights.get(k, 0))
+        contrib = float(contribs.get(k, 0))
+        color = LAYER_COLOR.get(k, C_INK)
+        bar_pct = max(0.0, min(100.0, score))
+        bar = Table([[""]], colWidths=[60 * mm * (bar_pct / 100) or 0.5])
+        bar.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), color),
+            ("BOX", (0, 0), (-1, -1), 0, color),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        bar_wrap = Table([[bar]], colWidths=[60 * mm], rowHeights=[3 * mm])
+        bar_wrap.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eef1f6")),
+            ("BOX", (0, 0), (-1, -1), 0.25, C_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        bd_rows.append([
+            Paragraph(_safe(LAYER_LABEL[k]), body_st),
+            Paragraph(f"<font color='{color.hexval()}'><b>{score:.1f}</b></font>", body_st),
+            bar_wrap,
+            Paragraph(f"{weight:.2f}", body_dim),
+            Paragraph(f"<b>+{contrib:.1f}</b>", body_st),
+        ])
+    bd_tbl = Table(bd_rows, colWidths=[44 * mm, 16 * mm, 65 * mm, 18 * mm, 22 * mm])
+    bd_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), C_INK),
+        ("TEXTCOLOR", (0, 0), (-1, 0), C_TEXT),
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.25, C_BORDER),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    body.append(bd_tbl)
+    body.append(Spacer(1, 2 * mm))
+
+    # Top SHAP features chip line (matches website)
+    shap = payload.get("top_shap_features") or []
+    if shap:
+        body.append(Paragraph(
+            f"<font color='{C_DIM.hexval()}' size='7'>TOP SHAP FEATURES (L3):</font> "
+            + _safe(", ".join(shap[:8])),
+            body_st,
+        ))
+        body.append(Spacer(1, 3 * mm))
+
+    # =====================================================================
+    # 8. Counterparty timeline
+    # =====================================================================
+    if timeline:
+        body.append(Paragraph(
+            f"Counterparty activity timeline ({len(timeline)} events)",
+            section_st,
+        ))
+        tl_rows = [[
+            Paragraph("<b>TIME</b>", body_st),
+            Paragraph("<b>TX-ID</b>", body_st),
+            Paragraph("<b>SENDER -&gt; RECEIVER</b>", body_st),
+            Paragraph("<b>AMOUNT</b>", body_st),
+            Paragraph("<b>RISK</b>", body_st),
+        ]]
+        for t in timeline[:20]:
+            level = t.get("risk_level") or "Low"
+            lvl_c = LEVEL_COLOR.get(level, C_TEAL)
+            row_bg = colors.HexColor("#fde7ee") if t.get("is_focal") else None
+            tl_rows.append([
+                Paragraph(_safe(str(t.get("timestamp", ""))[:19]), body_mono),
+                Paragraph(_safe(str(t.get("transaction_id", ""))[:10]), body_mono),
+                Paragraph(
+                    f"{_safe(str(t.get('sender_account', ''))[:10])} -&gt; "
+                    f"{_safe(str(t.get('receiver_account', ''))[:10])}",
+                    body_mono,
+                ),
+                Paragraph(_human_amount(t.get("amount")), body_st),
+                Paragraph(f"<font color='{lvl_c.hexval()}'>{float(t.get('risk_score', 0)):.0f} ({level})</font>",
+                          body_st),
+            ])
+        tl_tbl = Table(tl_rows, colWidths=[28 * mm, 22 * mm, 65 * mm, 30 * mm, 35 * mm], repeatRows=1)
+        tl_style = [
+            ("BACKGROUND", (0, 0), (-1, 0), C_INK),
+            ("TEXTCOLOR", (0, 0), (-1, 0), C_TEXT),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8),
+            ("FONTSIZE", (0, 1), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.25, C_BORDER),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]
+        # Highlight the focal row
+        for i, t in enumerate(timeline[:20], start=1):
+            if t.get("is_focal"):
+                tl_style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fde7ee")))
+        tl_tbl.setStyle(TableStyle(tl_style))
+        body.append(tl_tbl)
+        body.append(Spacer(1, 4 * mm))
+
+    # =====================================================================
+    # 9. Recommendations checklist
+    # =====================================================================
+    if recommendations:
+        body.append(Paragraph("Investigator checklist", section_st))
+        for rec in recommendations:
+            sev_c = SEVERITY_COLOR.get(rec.get("priority", "Medium"), C_AMBER)
+            body.append(Paragraph(
+                f"<font color='{C_DIM.hexval()}'>[ ]</font> "
+                f"<b>{_safe(rec.get('title', ''))}</b> &nbsp;"
+                f"<font color='{sev_c.hexval()}' size='7'>"
+                f"[{_safe(rec.get('priority', '').upper())}]</font>",
+                rec_title,
+            ))
+            body.append(Paragraph(
+                f"<font color='{C_DIM.hexval()}'>{_safe(rec.get('detail', ''))}</font>",
+                body_st,
+            ))
+            body.append(Spacer(1, 2 * mm))
+
+    # =====================================================================
+    # 10. Regulatory citations
+    # =====================================================================
+    if citations:
+        body.append(Paragraph("Regulatory context", section_st))
+        for c in citations:
+            body.append(Paragraph(
+                f"<font color='{C_VIOLET.hexval()}' size='8'><b>{_safe(c.get('code', ''))}</b></font>",
+                body_st,
+            ))
+            body.append(Paragraph(f"<b>{_safe(c.get('title', ''))}</b>", body_st))
+            body.append(Paragraph(_safe(c.get("detail", "")), body_dim))
+            body.append(Spacer(1, 2 * mm))
+
+    # =====================================================================
+    # 11. Filing notes (FIU STR free-text)
+    # =====================================================================
+    body.append(Paragraph("Suggested filing notes (FIU STR free-text)", section_st))
+    body.append(Paragraph(_safe(notes), body_mono))
 
     doc.build(body)
     return buf.getvalue()
+
+
+def _party_cell(payload: dict[str, Any], role: str, acct_key: str,
+                bank_key: str, country_key: str, body_st, body_dim, border_c) -> Table:
+    """Render a sender/receiver card. Helper for the parties section of
+    ``_render_pdf`` -- factored out so the table layout reads clearly."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Table, TableStyle
+
+    acct = str(payload.get(acct_key, "-"))
+    bank = str(payload.get(bank_key, "-"))
+    country = str(payload.get(country_key, "-"))
+    rows = [
+        [Paragraph(role.upper(),
+                   __import__("reportlab").lib.styles.ParagraphStyle(
+                       "p_role", parent=body_dim, fontSize=7))],
+        [Paragraph(f"<b>{acct[:24]}{'...' if len(acct) > 24 else ''}</b>", body_st)],
+        [Paragraph(f"<font color='#8a96b0' size='8'>{bank} - {country}</font>", body_st)],
+    ]
+    cell = Table(rows, colWidths=[76 * mm])
+    cell.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.4, border_c),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("BACKGROUND", (0, 0), (-1, -1), __import__("reportlab").lib.colors.HexColor("#f4f6fa")),
+    ]))
+    return cell
+
+
+def _stat_cell(label: str, value: str, value_color, body_st, body_dim) -> Table:
+    """Stat tile used in the peer-comparison row of the PDF."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Table, TableStyle
+    from reportlab.lib.styles import ParagraphStyle
+
+    rows = [
+        [Paragraph(label.upper(),
+                   ParagraphStyle("st_lbl", parent=body_dim, fontSize=6))],
+        [Paragraph(f"<font color='{value_color.hexval()}' size='11'><b>{value}</b></font>",
+                   ParagraphStyle("st_val", parent=body_st))],
+    ]
+    cell = Table(rows, colWidths=[34 * mm])
+    cell.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return cell
 
 
 # --------------------------------------------------------------------------- #
