@@ -251,6 +251,32 @@ def _row_to_event(row: dict[str, Any]) -> TransactionEvent:
 def build_stream_router(state: AppState) -> APIRouter:
     r = APIRouter(prefix="/stream", tags=["stream"])
 
+    @r.get("/recent")
+    def recent_events(
+        limit: int = Query(default=200, ge=1, le=1000),
+        only_alerted: bool = Query(default=False),
+        risk_level: str | None = Query(default=None,
+                                       description="Filter by risk_level (Low/Medium/High/Critical)"),
+    ) -> dict[str, Any]:
+        """Snapshot of the in-memory transaction buffer (most recent first).
+
+        Powers the "All Transactions" tab on the dashboard. Returns the same
+        payload shape the SSE stream emits, so the UI can mix this initial
+        snapshot with live SSE updates seamlessly. ``state.recent_events`` is
+        already bounded by MAX_BUFFER (200) inside the generator loop.
+        """
+        items: list[dict[str, Any]] = list(state.recent_events)
+        if risk_level:
+            items = [e for e in items if e.get("risk_level") == risk_level]
+        if only_alerted:
+            items = [e for e in items if e.get("alerted")]
+        items = items[:limit]
+        return {
+            "count":  len(items),
+            "buffer_size": len(state.recent_events),
+            "items":  items,
+        }
+
     @r.get("/events")
     async def stream_events(request: Request) -> StreamingResponse:
         """Server-Sent Events: each event published by the generator becomes

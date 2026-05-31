@@ -68,6 +68,13 @@ export const api = {
   alert: (id: string) => _get<any>(`/alerts/${id}`),
   alertStatus: (id: string, status: string, assigned_to?: string) =>
     _patch<any>(`/alerts/${id}/status`, { alert_status: status, assigned_to }),
+  recentEvents: (params?: { limit?: number; only_alerted?: boolean; risk_level?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.only_alerted) q.set("only_alerted", "true");
+    if (params?.risk_level) q.set("risk_level", params.risk_level);
+    return _get<{ count: number; buffer_size: number; items: any[] }>(`/stream/recent?${q.toString()}`);
+  },
   alertsClear: async () => {
     const r = await fetch(`${BASE}/alerts`, { method: "DELETE" });
     if (!r.ok) throw new Error(`DELETE /alerts -> ${r.status}`);

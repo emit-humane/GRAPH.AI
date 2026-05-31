@@ -170,6 +170,19 @@ def test_inject_csv_empty_400(client):
     assert r.status_code == 400
 
 
+def test_stream_recent_returns_snapshot(client):
+    """GET /stream/recent must return the live buffer snapshot shape used
+    by the All Transactions tab."""
+    r = client.get("/stream/recent?limit=10")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "count" in body and "buffer_size" in body and "items" in body
+    assert isinstance(body["items"], list)
+    # Filter parameters must be accepted (even if buffer is empty in CI)
+    r2 = client.get("/stream/recent?only_alerted=true&risk_level=High&limit=5")
+    assert r2.status_code == 200
+
+
 def test_clear_alerts_returns_count(client):
     """DELETE /alerts must wipe the DB + buffer and return the cleared count."""
     r = client.delete("/alerts")
